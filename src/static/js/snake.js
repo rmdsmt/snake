@@ -1,20 +1,20 @@
-// snake.js - Versão adaptada para integração com Spotify e Deezer
+// snake.js - Versão adaptada com movimentação suave
 
 // --- SELEÇÃO DE ELEMENTOS DO DOM ---
 const canvas = document.getElementById('snake-canvas');
 const ctx = canvas.getContext('2d');
-const scoreElement = document.getElementById('score'); // Elemento PAI da pontuação
-const scoreSpan = scoreElement.querySelector('span'); // O SPAN que contém o número
+const scoreElement = document.getElementById('score');
+const scoreSpan = scoreElement.querySelector('span');
 const timeElement = document.getElementById('time');
-const startButton = document.getElementById('start-btn'); // Nome usado no seu código
-const nowPlayingElement = document.getElementById('now-playing'); // O container principal
-const nowPlayingArt = document.getElementById('now-playing-art'); // A imagem da capa
-const nowPlayingTrack = document.getElementById('now-playing-track'); // O nome da faixa
-const nowPlayingArtist = document.getElementById('now-playing-artist'); // O nome do artista
+const startButton = document.getElementById('start-btn');
+const nowPlayingElement = document.getElementById('now-playing');
+const nowPlayingArt = document.getElementById('now-playing-art');
+const nowPlayingTrack = document.getElementById('now-playing-track');
+const nowPlayingArtist = document.getElementById('now-playing-artist');
 
 // --- VARIÁVEIS GLOBAIS DO JOGO ---
 let tracks = []; // Lista de músicas da API
-let snake = [{ x: 5, y: 5 }]; // Posição inicial da cobra
+let snake = [{ x: 5, y: 5, visualX: 5, visualY: 5 }]; // Posição inicial da cobra com coordenadas visuais
 let snakeBodyInfo = [0]; // Array para guardar o índice da música de cada segmento da cobra
 let currentDirection = 'right';
 let nextDirection = 'right';
@@ -26,6 +26,8 @@ let currentTrackIndex = 0; // Índice da música tocando
 let startTime = 0;
 let gameLoopTimeout = null; // Para controlar o loop com setTimeout
 let timerInterval = null; // Para o timer de tempo de jogo
+let lastUpdateTime = 0; // Para animação suave
+let animationSpeed = 0.15; // Velocidade da animação (0-1, quanto maior mais rápido)
 
 // Constantes de Grid e Tamanho
 const gridSize = 20; // Número de células na largura/altura
@@ -34,8 +36,8 @@ canvas.width = gridSize * tileSize;
 canvas.height = gridSize * tileSize;
 
 // Constantes de aceleração
-const INITIAL_INTERVAL = 180; // Velocidade inicial (ms)
-const MIN_INTERVAL = 70; // Velocidade máxima (ms)
+const INITIAL_INTERVAL = 220; // Velocidade inicial (ms) - um pouco mais lenta para animação suave
+const MIN_INTERVAL = 100; // Velocidade máxima (ms) - um pouco mais lenta para animação suave
 const ACCELERATION_FACTOR = 0.98; // Quanto mais perto de 1, mais lenta a aceleração
 let moveInterval = INITIAL_INTERVAL; // Velocidade atual
 
@@ -235,6 +237,21 @@ function checkCollision() {
     return false;
 }
 
+// Função para atualizar as coordenadas visuais (animação suave)
+function updateVisualPositions(deltaTime) {
+    for (let i = 0; i < snake.length; i++) {
+        const segment = snake[i];
+        
+        // Calcula a diferença entre posição real e visual
+        const dx = segment.x - segment.visualX;
+        const dy = segment.y - segment.visualY;
+        
+        // Atualiza posição visual com interpolação suave
+        segment.visualX += dx * animationSpeed * deltaTime;
+        segment.visualY += dy * animationSpeed * deltaTime;
+    }
+}
+
 function updateGame() {
     if (!gameStarted) return;
 
@@ -249,17 +266,22 @@ function updateGame() {
         case 'right': head.x += 1; break;
     }
 
+    // Adiciona coordenadas visuais iguais às reais para a nova cabeça
+    head.visualX = snake[0].visualX;
+    head.visualY = snake[0].visualY;
+
     // --- Verifica Colisões ---
     // Colisão com paredes
     if (head.x < 0 || head.x >= gridSize || head.y < 0 || head.y >= gridSize) {
         gameOver();
         return;
     }
-     // Colisão com o corpo (ignora a própria cabeça que ainda não foi adicionada)
-     for (let i = 0; i < snake.length; i++) { // Começa do 0 agora
+    
+    // Colisão com o corpo (ignora a própria cabeça que ainda não foi adicionada)
+    for (let i = 0; i < snake.length; i++) {
         if (head.x === snake[i].x && head.y === snake[i].y) {
-             gameOver();
-             return; // Já colidiu
+            gameOver();
+            return; // Já colidiu
         }
     }
 
@@ -294,14 +316,24 @@ function updateGame() {
     }
 
     // Agenda o próximo passo do jogo
-     clearTimeout(gameLoopTimeout); // Limpa timeout anterior
-     gameLoopTimeout = setTimeout(updateGame, moveInterval); // Agenda o próximo
+    clearTimeout(gameLoopTimeout); // Limpa timeout anterior
+    gameLoopTimeout = setTimeout(updateGame, moveInterval); // Agenda o próximo
 }
 
 // --- FUNÇÕES DE DESENHO ---
 
-async function drawGame() {
-    if (!gameStarted && !ctx) return; // Não desenha se não começou ou não tem contexto
+async function drawGame(timestamp) {
+    if (!ctx) return; // Não desenha se não tem contexto
+
+    // Calcula o delta time para animação suave
+    if (!lastUpdateTime) lastUpdateTime = timestamp;
+    const deltaTime = (timestamp - lastUpdateTime) / (1000 / 60); // Normaliza para 60fps
+    lastUpdateTime = timestamp;
+
+    // Atualiza posições visuais para animação suave
+    if (gameStarted) {
+        updateVisualPositions(deltaTime);
+    }
 
     // Limpa o canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -330,56 +362,78 @@ async function drawGame() {
                 ctx.drawImage(img, food.x * tileSize + offset, food.y * tileSize + offset, size, size);
                 ctx.restore(); // Remove o clip
 
-                 // Desenha borda pulsante
-                 ctx.strokeStyle = `rgba(29, 185, 84, ${0.5 + Math.sin(Date.now() / 200) * 0.5})`;
-                 ctx.lineWidth = 2;
-                 // Ajuste para desenhar a borda no retângulo que contém o círculo
-                 ctx.strokeRect(food.x * tileSize + offset, food.y * tileSize + offset, size, size);
+                // Desenha borda pulsante
+                ctx.strokeStyle = `rgba(29, 185, 84, ${0.5 + Math.sin(Date.now() / 200) * 0.5})`;
+                ctx.lineWidth = 2;
+                // Ajuste para desenhar a borda no retângulo que contém o círculo
+                ctx.strokeRect(food.x * tileSize + offset, food.y * tileSize + offset, size, size);
             } else {
-                 console.warn(`Track não encontrada para comida no índice ${food.trackIndex}`);
-                 // Desenha fallback se track não existir
-                 ctx.fillStyle = 'red';
-                 ctx.fillRect(food.x * tileSize, food.y * tileSize, tileSize, tileSize);
+                console.warn(`Track não encontrada para comida no índice ${food.trackIndex}`);
+                // Desenha fallback se track não existir
+                ctx.fillStyle = 'red';
+                ctx.fillRect(food.x * tileSize, food.y * tileSize, tileSize, tileSize);
             }
         } catch(error) {
-             console.error("Erro ao desenhar comida:", error);
-             ctx.fillStyle = 'red'; // Fallback visual
-             ctx.fillRect(food.x * tileSize, food.y * tileSize, tileSize, tileSize);
+            console.error("Erro ao desenhar comida:", error);
+            ctx.fillStyle = 'red'; // Fallback visual
+            ctx.fillRect(food.x * tileSize, food.y * tileSize, tileSize, tileSize);
         }
     }
 
-    // Desenha a cobra
+    // Desenha a cobra com posições visuais (animação suave)
     for (let i = 0; i < snake.length; i++) {
         const segment = snake[i];
         const trackIndex = snakeBodyInfo[i] !== undefined ? snakeBodyInfo[i] : 0; // Pega info do corpo ou usa 0
 
-         try {
-             const segmentTrack = tracks[trackIndex];
-             if (segmentTrack) {
-                 const img = await loadImage(segmentTrack.image);
-                 ctx.drawImage(img, segment.x * tileSize, segment.y * tileSize, tileSize, tileSize);
+        try {
+            const segmentTrack = tracks[trackIndex];
+            if (segmentTrack) {
+                const img = await loadImage(segmentTrack.image);
+                
+                // Usa as coordenadas visuais para desenho suave
+                ctx.drawImage(
+                    img, 
+                    segment.visualX * tileSize, 
+                    segment.visualY * tileSize, 
+                    tileSize, 
+                    tileSize
+                );
 
-                 // Adiciona destaque na cabeça
-                 if (i === 0) {
-                     ctx.strokeStyle = 'rgba(255,255,255,0.7)'; // Cor mais visível
-                     ctx.lineWidth = 2; // Linha mais grossa
-                     ctx.strokeRect(segment.x * tileSize, segment.y * tileSize, tileSize, tileSize);
-                 }
-             } else {
-                 console.warn(`Track não encontrada para segmento da cobra no índice ${trackIndex}`);
-                  ctx.fillStyle = i === 0 ? '#1DB954' : '#1ed760'; // Cor fallback
-                  ctx.fillRect(segment.x * tileSize, segment.y * tileSize, tileSize, tileSize);
-             }
-
-         } catch(error) {
+                // Adiciona destaque na cabeça
+                if (i === 0) {
+                    ctx.strokeStyle = 'rgba(255,255,255,0.7)'; // Cor mais visível
+                    ctx.lineWidth = 2; // Linha mais grossa
+                    ctx.strokeRect(
+                        segment.visualX * tileSize, 
+                        segment.visualY * tileSize, 
+                        tileSize, 
+                        tileSize
+                    );
+                }
+            } else {
+                console.warn(`Track não encontrada para segmento da cobra no índice ${trackIndex}`);
+                ctx.fillStyle = i === 0 ? '#1DB954' : '#1ed760'; // Cor fallback
+                ctx.fillRect(
+                    segment.visualX * tileSize, 
+                    segment.visualY * tileSize, 
+                    tileSize, 
+                    tileSize
+                );
+            }
+        } catch(error) {
             console.error("Erro ao desenhar segmento da cobra:", error);
-             ctx.fillStyle = i === 0 ? '#1DB954' : '#1ed760'; // Cor fallback
-             ctx.fillRect(segment.x * tileSize, segment.y * tileSize, tileSize, tileSize);
-         }
+            ctx.fillStyle = i === 0 ? '#1DB954' : '#1ed760'; // Cor fallback
+            ctx.fillRect(
+                segment.visualX * tileSize, 
+                segment.visualY * tileSize, 
+                tileSize, 
+                tileSize
+            );
+        }
     }
 
-     // Chama o próximo frame de desenho
-     requestAnimationFrame(drawGame);
+    // Chama o próximo frame de desenho
+    requestAnimationFrame(drawGame);
 }
 
 // --- FUNÇÕES DE CONTROLE DO JOGO ---
@@ -395,16 +449,16 @@ function gameOver() {
 
     // Adicionar mensagem visual de Game Over no canvas
     setTimeout(() => { // Pequeno delay para garantir que o último frame foi limpo
-         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-         ctx.fillRect(0, 0, canvas.width, canvas.height);
-         ctx.fillStyle = 'white';
-         ctx.font = '30px Montserrat';
-         ctx.textAlign = 'center';
-         ctx.fillText('Fim de Jogo!', canvas.width / 2, canvas.height / 2 - 20);
-         ctx.font = '20px Poppins';
-         ctx.fillText(`Pontuação: ${score}`, canvas.width / 2, canvas.height / 2 + 20);
-         ctx.font = '16px Poppins';
-         ctx.fillText('Pressione "Iniciar" para jogar novamente', canvas.width / 2, canvas.height / 2 + 60);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'white';
+        ctx.font = '30px Montserrat';
+        ctx.textAlign = 'center';
+        ctx.fillText('Fim de Jogo!', canvas.width / 2, canvas.height / 2 - 20);
+        ctx.font = '20px Poppins';
+        ctx.fillText(`Pontuação: ${score}`, canvas.width / 2, canvas.height / 2 + 20);
+        ctx.font = '16px Poppins';
+        ctx.fillText('Pressione "Iniciar" para jogar novamente', canvas.width / 2, canvas.height / 2 + 60);
     }, 50); // 50ms delay
 
     startButton.disabled = false; // Permite reiniciar
@@ -415,12 +469,13 @@ function startGame() {
     if (gameStarted) return; // Evita iniciar múltiplas vezes
 
     // Reseta o jogo
-    snake = [{ x: 5, y: 5 }];
+    snake = [{ x: 5, y: 5, visualX: 5, visualY: 5 }];
     snakeBodyInfo = [0];
     currentDirection = 'right';
     nextDirection = 'right';
     score = 0;
     moveInterval = INITIAL_INTERVAL;
+    lastUpdateTime = 0;
     
     if (scoreSpan) scoreSpan.textContent = '0';
     
@@ -438,7 +493,7 @@ function startGame() {
     // Inicia o loop do jogo
     gameStarted = true;
     updateGame();
-    drawGame();
+    requestAnimationFrame(drawGame);
     
     // Adiciona listener de teclado
     document.addEventListener('keydown', handleKeyDown);
@@ -510,7 +565,7 @@ startButton.addEventListener('click', async () => {
 
 // Inicializa o jogo (apenas prepara, não começa)
 updateNowPlaying(null); // Limpa o display "Now Playing"
-drawGame(); // Desenha o estado inicial
+requestAnimationFrame(drawGame); // Inicia o loop de desenho
 
 // Adiciona suporte a touch para dispositivos móveis
 let touchStartX = 0;
@@ -532,14 +587,17 @@ canvas.addEventListener('touchmove', function(e) {
     const diffY = touchEndY - touchStartY;
     
     // Determina a direção do swipe baseado na maior diferença
-    if (Math.abs(diffX) > Math.abs(diffY)) {
+    // Aumenta o limite mínimo para evitar movimentos acidentais
+    const minSwipeDistance = 10;
+    
+    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > minSwipeDistance) {
         // Swipe horizontal
         if (diffX > 0 && currentDirection !== 'left') {
             nextDirection = 'right';
         } else if (diffX < 0 && currentDirection !== 'right') {
             nextDirection = 'left';
         }
-    } else {
+    } else if (Math.abs(diffY) > minSwipeDistance) {
         // Swipe vertical
         if (diffY > 0 && currentDirection !== 'up') {
             nextDirection = 'down';
