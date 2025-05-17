@@ -1,4 +1,4 @@
-// snake.js - Versão adaptada com movimentação suave
+// snake.js - Versão adaptada com movimentação suave e rápida
 
 // --- SELEÇÃO DE ELEMENTOS DO DOM ---
 const canvas = document.getElementById('snake-canvas');
@@ -27,7 +27,7 @@ let startTime = 0;
 let gameLoopTimeout = null; // Para controlar o loop com setTimeout
 let timerInterval = null; // Para o timer de tempo de jogo
 let lastUpdateTime = 0; // Para animação suave
-let animationSpeed = 0.15; // Velocidade da animação (0-1, quanto maior mais rápido)
+let animationSpeed = 0.4; // Velocidade da animação (aumentada para movimento mais rápido)
 
 // Constantes de Grid e Tamanho
 const gridSize = 20; // Número de células na largura/altura
@@ -36,8 +36,8 @@ canvas.width = gridSize * tileSize;
 canvas.height = gridSize * tileSize;
 
 // Constantes de aceleração
-const INITIAL_INTERVAL = 220; // Velocidade inicial (ms) - um pouco mais lenta para animação suave
-const MIN_INTERVAL = 100; // Velocidade máxima (ms) - um pouco mais lenta para animação suave
+const INITIAL_INTERVAL = 180; // Velocidade inicial (ms) - ajustada para ser mais rápida
+const MIN_INTERVAL = 80; // Velocidade máxima (ms) - ajustada para ser mais rápida
 const ACCELERATION_FACTOR = 0.98; // Quanto mais perto de 1, mais lenta a aceleração
 let moveInterval = INITIAL_INTERVAL; // Velocidade atual
 
@@ -239,16 +239,36 @@ function checkCollision() {
 
 // Função para atualizar as coordenadas visuais (animação suave)
 function updateVisualPositions(deltaTime) {
-    for (let i = 0; i < snake.length; i++) {
+    // Usa um loop separado para garantir que a cabeça seja atualizada primeiro
+    // Isso cria um efeito de "onda" mais natural no movimento da cobra
+    
+    // Primeiro atualiza a cabeça
+    const head = snake[0];
+    const dx = head.x - head.visualX;
+    const dy = head.y - head.visualY;
+    
+    // Atualiza posição visual com interpolação suave
+    head.visualX += dx * animationSpeed * deltaTime;
+    head.visualY += dy * animationSpeed * deltaTime;
+    
+    // Depois atualiza o resto do corpo com um pequeno atraso
+    for (let i = 1; i < snake.length; i++) {
         const segment = snake[i];
+        const prevSegment = snake[i-1];
         
-        // Calcula a diferença entre posição real e visual
-        const dx = segment.x - segment.visualX;
-        const dy = segment.y - segment.visualY;
+        // Segue o segmento anterior com um pequeno atraso
+        const targetX = prevSegment.visualX;
+        const targetY = prevSegment.visualY;
+        
+        // Calcula a diferença entre posição atual e alvo
+        const dx = targetX - segment.visualX;
+        const dy = targetY - segment.visualY;
         
         // Atualiza posição visual com interpolação suave
-        segment.visualX += dx * animationSpeed * deltaTime;
-        segment.visualY += dy * animationSpeed * deltaTime;
+        // Segmentos mais próximos da cabeça se movem mais rápido
+        const speedFactor = 1 - (i / (snake.length * 2));
+        segment.visualX += dx * animationSpeed * deltaTime * speedFactor;
+        segment.visualY += dy * animationSpeed * deltaTime * speedFactor;
     }
 }
 
@@ -267,8 +287,8 @@ function updateGame() {
     }
 
     // Adiciona coordenadas visuais iguais às reais para a nova cabeça
-    head.visualX = snake[0].visualX;
-    head.visualY = snake[0].visualY;
+    head.visualX = snake[0].x; // Usa a posição anterior da cabeça como ponto de partida
+    head.visualY = snake[0].y; // Isso cria um efeito mais suave
 
     // --- Verifica Colisões ---
     // Colisão com paredes
@@ -393,8 +413,8 @@ async function drawGame(timestamp) {
                 // Usa as coordenadas visuais para desenho suave
                 ctx.drawImage(
                     img, 
-                    segment.visualX * tileSize, 
-                    segment.visualY * tileSize, 
+                    Math.round(segment.visualX * tileSize), // Arredonda para evitar desenho borrado
+                    Math.round(segment.visualY * tileSize), 
                     tileSize, 
                     tileSize
                 );
@@ -404,8 +424,8 @@ async function drawGame(timestamp) {
                     ctx.strokeStyle = 'rgba(255,255,255,0.7)'; // Cor mais visível
                     ctx.lineWidth = 2; // Linha mais grossa
                     ctx.strokeRect(
-                        segment.visualX * tileSize, 
-                        segment.visualY * tileSize, 
+                        Math.round(segment.visualX * tileSize), 
+                        Math.round(segment.visualY * tileSize), 
                         tileSize, 
                         tileSize
                     );
@@ -414,8 +434,8 @@ async function drawGame(timestamp) {
                 console.warn(`Track não encontrada para segmento da cobra no índice ${trackIndex}`);
                 ctx.fillStyle = i === 0 ? '#1DB954' : '#1ed760'; // Cor fallback
                 ctx.fillRect(
-                    segment.visualX * tileSize, 
-                    segment.visualY * tileSize, 
+                    Math.round(segment.visualX * tileSize), 
+                    Math.round(segment.visualY * tileSize), 
                     tileSize, 
                     tileSize
                 );
@@ -424,8 +444,8 @@ async function drawGame(timestamp) {
             console.error("Erro ao desenhar segmento da cobra:", error);
             ctx.fillStyle = i === 0 ? '#1DB954' : '#1ed760'; // Cor fallback
             ctx.fillRect(
-                segment.visualX * tileSize, 
-                segment.visualY * tileSize, 
+                Math.round(segment.visualX * tileSize), 
+                Math.round(segment.visualY * tileSize), 
                 tileSize, 
                 tileSize
             );
