@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, session
 import requests
 import os
+import json
 
 lastfm_bp = Blueprint('lastfm', __name__)
 
@@ -34,6 +35,59 @@ def get_deezer_image(artist, track):
     except Exception as e:
         print(f"Erro ao buscar imagem no Deezer: {e}")
         return None
+
+# Função para processar e adicionar imagens às tracks
+def process_tracks_with_images(tracks_list):
+    if not tracks_list:
+        return []
+    
+    processed_tracks = []
+    
+    for track in tracks_list:
+        # Verifica se já tem uma imagem válida do Last.fm
+        has_valid_image = False
+        track_image = None
+        
+        if isinstance(track, dict) and 'image' in track:
+            for img in track['image']:
+                if img.get('#text') and not img.get('#text').endswith('2a96cbd8b46e442fc41c2b86b821562f.png'):
+                    has_valid_image = True
+                    track_image = img.get('#text')
+                    break
+        
+        # Se não tiver imagem válida, busca no Deezer
+        if not has_valid_image:
+            artist_name = track.get('artist', {}).get('name', '') if isinstance(track.get('artist'), dict) else track.get('artist', {}).get('#text', '')
+            track_name = track.get('name', '')
+            
+            if artist_name and track_name:
+                deezer_image = get_deezer_image(artist_name, track_name)
+                
+                if deezer_image:
+                    track_image = deezer_image
+                    
+                    # Adiciona a imagem do Deezer ao objeto da track
+                    if 'image' not in track:
+                        track['image'] = []
+                    
+                    # Adiciona a imagem em diferentes tamanhos (simulando o formato do Last.fm)
+                    track['image'] = [
+                        {'#text': deezer_image, 'size': 'small'},
+                        {'#text': deezer_image, 'size': 'medium'},
+                        {'#text': deezer_image, 'size': 'large'},
+                        {'#text': deezer_image, 'size': 'extralarge'}
+                    ]
+        
+        # Adiciona a track processada à lista
+        processed_tracks.append({
+            'name': track.get('name', ''),
+            'artist': artist_name,
+            'playcount': track.get('playcount', '0'),
+            'image': track_image or 'https://via.placeholder.com/50?text=?',
+            'url': track.get('url', '')
+        })
+    
+    return processed_tracks
 
 @lastfm_bp.route('/api/lastfm/stats')
 def get_lastfm_stats():
@@ -74,42 +128,11 @@ def get_lastfm_stats():
             }
         )
         
-        if top_tracks_response.status_code != 200:
-            return jsonify({
-                "user": user_data.get('user', {}),
-                "error_top_tracks": "Não foi possível buscar top tracks",
-                "details": top_tracks_response.text
-            })
-        
-        top_tracks_data = top_tracks_response.json()
-        
-        # Enriquece as top tracks com imagens do Deezer
-        if 'toptracks' in top_tracks_data and 'track' in top_tracks_data['toptracks']:
-            for track in top_tracks_data['toptracks']['track']:
-                # Verifica se já tem uma imagem válida do Last.fm
-                has_valid_image = False
-                if 'image' in track:
-                    for img in track['image']:
-                        if img.get('#text') and not img.get('#text').endswith('2a96cbd8b46e442fc41c2b86b821562f.png'):
-                            has_valid_image = True
-                            break
-                
-                # Se não tiver imagem válida, busca no Deezer
-                if not has_valid_image:
-                    artist_name = track['artist']['name']
-                    track_name = track['name']
-                    deezer_image = get_deezer_image(artist_name, track_name)
-                    
-                    if deezer_image:
-                        # Adiciona a imagem do Deezer ao objeto da track
-                        if 'image' not in track:
-                            track['image'] = []
-                        
-                        # Adiciona a imagem em diferentes tamanhos (simulando o formato do Last.fm)
-                        track['image'].append({'#text': deezer_image, 'size': 'small'})
-                        track['image'].append({'#text': deezer_image, 'size': 'medium'})
-                        track['image'].append({'#text': deezer_image, 'size': 'large'})
-                        track['image'].append({'#text': deezer_image, 'size': 'extralarge'})
+        top_tracks = []
+        if top_tracks_response.status_code == 200:
+            top_tracks_data = top_tracks_response.json()
+            if 'toptracks' in top_tracks_data and 'track' in top_tracks_data['toptracks']:
+                top_tracks = process_tracks_with_images(top_tracks_data['toptracks']['track'])
         
         # Busca os artistas mais ouvidos
         top_artists_response = requests.get(
@@ -123,9 +146,24 @@ def get_lastfm_stats():
             }
         )
         
-        top_artists = {}
+        top_artists = []
         if top_artists_response.status_code == 200:
-            top_artists = top_artists_response.json()
+            top_artists_data = top_artists_response.json()
+            if 'topartists' in top_artists_data and 'artist' in top_artists_data['topartists']:
+                for artist in top_artists_data['topartists']['artist']:
+                    artist_image = None
+                    if 'image' in artist:
+                        for img in artist['image']:
+                            if img.get('#text') and not img.get('#text').endswith('2a96cbd8b46e442fc41c2b86b821562f.png'):
+                                artist_image = img.get('#text')
+                                break
+                    
+                    top_artists.append({
+                        'name': artist.get('name', ''),
+                        'playcount': artist.get('playcount', '0'),
+                        'image': artist_image or 'https://via.placeholder.com/50?text=?',
+                        'url': artist.get('url', '')
+                    })
         
         # Busca estatísticas recentes
         recent_tracks_response = requests.get(
@@ -139,46 +177,23 @@ def get_lastfm_stats():
             }
         )
         
-        recent_tracks = {}
+        recent_tracks = []
         if recent_tracks_response.status_code == 200:
             recent_tracks_data = recent_tracks_response.json()
-            
-            # Enriquece as recent tracks com imagens do Deezer
             if 'recenttracks' in recent_tracks_data and 'track' in recent_tracks_data['recenttracks']:
-                for track in recent_tracks_data['recenttracks']['track']:
-                    # Verifica se já tem uma imagem válida do Last.fm
-                    has_valid_image = False
-                    if 'image' in track:
-                        for img in track['image']:
-                            if img.get('#text') and not img.get('#text').endswith('2a96cbd8b46e442fc41c2b86b821562f.png'):
-                                has_valid_image = True
-                                break
-                    
-                    # Se não tiver imagem válida, busca no Deezer
-                    if not has_valid_image:
-                        artist_name = track['artist']['#text']
-                        track_name = track['name']
-                        deezer_image = get_deezer_image(artist_name, track_name)
-                        
-                        if deezer_image:
-                            # Adiciona a imagem do Deezer ao objeto da track
-                            if 'image' not in track:
-                                track['image'] = []
-                            
-                            # Adiciona a imagem em diferentes tamanhos (simulando o formato do Last.fm)
-                            track['image'].append({'#text': deezer_image, 'size': 'small'})
-                            track['image'].append({'#text': deezer_image, 'size': 'medium'})
-                            track['image'].append({'#text': deezer_image, 'size': 'large'})
-                            track['image'].append({'#text': deezer_image, 'size': 'extralarge'})
-            
-            recent_tracks = recent_tracks_data
+                recent_tracks = process_tracks_with_images(recent_tracks_data['recenttracks']['track'])
         
-        # Retorna todos os dados coletados
+        # Retorna todos os dados coletados em formato simplificado
         return jsonify({
-            "user": user_data.get('user', {}),
-            "top_tracks": top_tracks_data.get('toptracks', {}),
-            "top_artists": top_artists.get('topartists', {}),
-            "recent_tracks": recent_tracks.get('recenttracks', {})
+            "user": {
+                "name": user_data.get('user', {}).get('name', ''),
+                "url": user_data.get('user', {}).get('url', ''),
+                "playcount": user_data.get('user', {}).get('playcount', '0'),
+                "image": user_data.get('user', {}).get('image', [{}])[-1].get('#text', '')
+            },
+            "top_tracks": top_tracks,
+            "top_artists": top_artists,
+            "recent_tracks": recent_tracks
         })
     
     except Exception as e:
