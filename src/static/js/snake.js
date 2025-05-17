@@ -1,4 +1,4 @@
-// snake.js - Versão adaptada com movimentação suave
+// snake.js - Versão final com física e efeitos visuais
 
 // --- SELEÇÃO DE ELEMENTOS DO DOM ---
 const canvas = document.getElementById('snake-canvas');
@@ -14,32 +14,32 @@ const nowPlayingArtist = document.getElementById('now-playing-artist');
 
 // --- VARIÁVEIS GLOBAIS DO JOGO ---
 let tracks = []; // Lista de músicas da API
-let snake = [{ x: 5, y: 5, visualX: 5, visualY: 5 }]; // Posição inicial da cobra com coordenadas visuais
-let snakeBodyInfo = [0]; // Array para guardar o índice da música de cada segmento da cobra
+let snakeTracks = []; // Índices das músicas na cobra
 let currentDirection = 'right';
 let nextDirection = 'right';
+let snake = [{ x: 5, y: 5, px: 5, py: 5, offsetY: 0 }]; // Posição inicial com física
 let food = null; // Objeto da comida { x, y, trackIndex }
 let score = 0;
 let gameStarted = false;
 let currentAudio = null; // Para controlar o preview de áudio
 let currentTrackIndex = 0; // Índice da música tocando
 let startTime = 0;
-let gameLoopTimeout = null; // Para controlar o loop com setTimeout
-let timerInterval = null; // Para o timer de tempo de jogo
-let lastUpdateTime = 0; // Para animação suave
-let animationSpeed = 0.15; // Velocidade da animação (0-1, quanto maior mais rápido)
+let moveInterval = 150; // Velocidade inicial (ms)
+let grow = 0; // Contador de crescimento
+let lastTime = 0; // Para animação suave
+let accumulator = 0; // Acumulador de tempo para física
 
 // Constantes de Grid e Tamanho
 const gridSize = 20; // Número de células na largura/altura
-const tileSize = 20; // Tamanho de cada célula em pixels
-canvas.width = gridSize * tileSize;
-canvas.height = gridSize * tileSize;
+const baseTileSize = 20; // Tamanho base de cada célula em pixels
+const snakeTileSize = 20; // Tamanho dos segmentos da cobra
+canvas.width = gridSize * baseTileSize;
+canvas.height = gridSize * baseTileSize;
 
-// Constantes de aceleração
-const INITIAL_INTERVAL = 220; // Velocidade inicial (ms) - um pouco mais lenta para animação suave
-const MIN_INTERVAL = 100; // Velocidade máxima (ms) - um pouco mais lenta para animação suave
-const ACCELERATION_FACTOR = 0.98; // Quanto mais perto de 1, mais lenta a aceleração
-let moveInterval = INITIAL_INTERVAL; // Velocidade atual
+// Constantes de efeito físico
+const PUSH_FORCE = 15; // Força de impulso quando come
+const GRAVITY = 0.8; // Gravidade aplicada aos segmentos
+const BOUNCE = 0.6; // Coeficiente de rebote
 
 // Cache de Imagens e Fallback
 const imageCache = new Map();
@@ -54,7 +54,7 @@ function formatTime(totalSeconds) {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
-// Função shuffle
+// Função shuffle para garantir ordem aleatória das músicas
 function shuffleArray(array) {
   const newArray = [...array];
   for (let i = newArray.length - 1; i > 0; i--) {
@@ -92,8 +92,8 @@ function playPreview(previewUrl) {
   if (previewUrl) {
     currentAudio = new Audio(previewUrl);
     currentAudio.volume = 0.4; // Ajuste o volume
+    currentAudio.loop = true; // Loop para música contínua
     currentAudio.play().catch(e => console.error("Erro ao tocar áudio:", e));
-    // Não usar loop para previews curtos
   }
 }
 
@@ -143,8 +143,8 @@ async function fetchTracks() {
     const selectedPeriod = selectedPeriodInput ? selectedPeriodInput.value : '12month'; // Padrão: 12month
     console.log(`>>> [Frontend] Enviando período para API: ${selectedPeriod}`); // Log
 
-    // 2. Construir a URL da API
-    const apiUrl = `/api/snake-tracks?period=${selectedPeriod}`;
+    // 2. Construir a URL da API com timestamp para evitar cache
+    const apiUrl = `/api/snake-tracks?period=${selectedPeriod}&shuffle=${Date.now()}`;
     console.log('Fetching tracks from:', apiUrl);
 
     // 3. Feedback visual durante o carregamento
@@ -172,6 +172,10 @@ async function fetchTracks() {
             throw new Error(`Poucas músicas (${data.length}) encontradas para jogar.`);
         }
 
+        // Embaralha as músicas para garantir ordem aleatória
+        data = shuffleArray(data);
+        console.log("Músicas embaralhadas para ordem aleatória");
+
         // Pré-carrega imagens (opcional, mas melhora performance visual)
         await Promise.all(data.map(track => loadImage(track.image)));
 
@@ -195,6 +199,9 @@ function generateFood() {
         return null;
     }
 
+    // Filtra índices de músicas que ainda não estão na cobra
+    const available = tracks.map((_, i) => i).filter(i => !snakeTracks.includes(i));
+    
     let newFoodPosition;
     let trackIndex;
     let attempts = 0;
@@ -206,8 +213,12 @@ function generateFood() {
             x: Math.floor(Math.random() * gridSize),
             y: Math.floor(Math.random() * gridSize),
         };
-        // Índice de música aleatório
-        trackIndex = Math.floor(Math.random() * tracks.length);
+        
+        // Índice de música aleatório, priorizando músicas não usadas
+        trackIndex = available.length > 0
+            ? available[Math.floor(Math.random() * available.length)]
+            : Math.floor(Math.random() * tracks.length);
+            
         attempts++;
     } while (attempts < maxAttempts && snake.some(segment => segment.x === newFoodPosition.x && segment.y === newFoodPosition.y));
 
@@ -237,203 +248,187 @@ function checkCollision() {
     return false;
 }
 
-// Função para atualizar as coordenadas visuais (animação suave)
-function updateVisualPositions(deltaTime) {
-    for (let i = 0; i < snake.length; i++) {
-        const segment = snake[i];
+// Função para verificar se comeu comida
+function checkFood() {
+    const head = snake[0];
+    if (food && head.x === food.x && head.y === food.y) {
+        // Pega a música correspondente à comida
+        const track = tracks[food.trackIndex];
         
-        // Calcula a diferença entre posição real e visual
-        const dx = segment.x - segment.visualX;
-        const dy = segment.y - segment.visualY;
+        // Toca a música
+        if (track.preview) {
+            playPreview(track.preview);
+        }
         
-        // Atualiza posição visual com interpolação suave
-        segment.visualX += dx * animationSpeed * deltaTime;
-        segment.visualY += dy * animationSpeed * deltaTime;
+        // Atualiza o display Now Playing
+        updateNowPlaying(track);
+        
+        // Adiciona o índice da música ao início da lista de músicas da cobra
+        snakeTracks.unshift(food.trackIndex);
+        
+        // Incrementa o contador de crescimento
+        grow += 1;
+        
+        // Atualiza a pontuação
+        score += 10;
+        if (scoreSpan) scoreSpan.textContent = score;
+        
+        // Acelera o jogo
+        moveInterval = Math.max(70, moveInterval * 0.98);
+        
+        // Aplica efeito de impulso em todos os segmentos
+        snake.forEach(segment => {
+            segment.offsetY += PUSH_FORCE;
+        });
+        
+        // Gera nova comida
+        food = generateFood();
     }
 }
 
-function updateGame() {
-    if (!gameStarted) return;
+// Função para atualizar a física dos segmentos
+function updatePhysics() {
+    snake.forEach(segment => {
+        if (segment.offsetY !== 0) {
+            // Aplica gravidade
+            segment.offsetY += GRAVITY;
+            
+            // Se estiver caindo (offsetY positivo), aplica rebote
+            if (segment.offsetY > 0) {
+                segment.offsetY *= -BOUNCE;
+                
+                // Se o movimento for muito pequeno, para completamente
+                if (Math.abs(segment.offsetY) < 0.5) segment.offsetY = 0;
+            }
+        }
+    });
+}
 
-    // --- Movimento da Cobra ---
-    const head = { ...snake[0] }; // Copia a cabeça atual
-    currentDirection = nextDirection; // Atualiza a direção ANTES de mover
+// Função para atualizar a posição da cobra
+function updateSnake() {
+    // Vetores de direção
+    const dx = { right: 1, left: -1, up: 0, down: 0 };
+    const dy = { right: 0, left: 0, up: -1, down: 1 };
 
-    switch (currentDirection) {
-        case 'up': head.y -= 1; break;
-        case 'down': head.y += 1; break;
-        case 'left': head.x -= 1; break;
-        case 'right': head.x += 1; break;
-    }
-
-    // Adiciona coordenadas visuais iguais às reais para a nova cabeça
-    head.visualX = snake[0].visualX;
-    head.visualY = snake[0].visualY;
-
-    // --- Verifica Colisões ---
-    // Colisão com paredes
-    if (head.x < 0 || head.x >= gridSize || head.y < 0 || head.y >= gridSize) {
-        gameOver();
-        return;
-    }
+    // Atualiza a direção atual
+    currentDirection = nextDirection;
     
-    // Colisão com o corpo (ignora a própria cabeça que ainda não foi adicionada)
-    for (let i = 0; i < snake.length; i++) {
-        if (head.x === snake[i].x && head.y === snake[i].y) {
-            gameOver();
-            return; // Já colidiu
-        }
-    }
-
-    // Adiciona a nova cabeça
-    snake.unshift(head);
-
-    // --- Verifica se comeu a comida ---
-    if (food && head.x === food.x && head.y === food.y) {
-        score += 10;
-        if (scoreSpan) scoreSpan.textContent = score; // Atualiza o span do score
-
-        const eatenTrack = tracks[food.trackIndex];
-        updateNowPlaying(eatenTrack); // ATUALIZA O DISPLAY
-        playPreview(eatenTrack?.preview); // TOCA O PREVIEW
-
-        // Adiciona a info da track comida ao corpo da cobra
-        snakeBodyInfo.unshift(food.trackIndex);
-
-        // Acelera o jogo
-        moveInterval = Math.max(MIN_INTERVAL, moveInterval * ACCELERATION_FACTOR);
-
-        food = generateFood(); // Gera nova comida
-
-        // Cobra cresceu, não remove a cauda
+    // Copia a cabeça atual
+    const head = { ...snake[0] };
+    
+    // Cria nova cabeça com posição atualizada
+    const newHead = {
+        x: head.x + dx[currentDirection],
+        y: head.y + dy[currentDirection],
+        px: head.x, // Posição anterior X (para interpolação)
+        py: head.y, // Posição anterior Y (para interpolação)
+        offsetY: -PUSH_FORCE // Aplica impulso inicial na nova cabeça
+    };
+    
+    // Adiciona a nova cabeça ao início da cobra
+    snake.unshift(newHead);
+    
+    // Remove a cauda se não estiver crescendo
+    if (grow > 0) {
+        grow--;
     } else {
-        // Cobra não comeu, remove a cauda para dar efeito de movimento
         snake.pop();
-        // Remove também a informação do último segmento
-        if (snakeBodyInfo.length > snake.length) {
-           snakeBodyInfo.pop();
-        }
     }
-
-    // Agenda o próximo passo do jogo
-    clearTimeout(gameLoopTimeout); // Limpa timeout anterior
-    gameLoopTimeout = setTimeout(updateGame, moveInterval); // Agenda o próximo
 }
 
 // --- FUNÇÕES DE DESENHO ---
 
-async function drawGame(timestamp) {
-    if (!ctx) return; // Não desenha se não tem contexto
-
-    // Calcula o delta time para animação suave
-    if (!lastUpdateTime) lastUpdateTime = timestamp;
-    const deltaTime = (timestamp - lastUpdateTime) / (1000 / 60); // Normaliza para 60fps
-    lastUpdateTime = timestamp;
-
-    // Atualiza posições visuais para animação suave
-    if (gameStarted) {
-        updateVisualPositions(deltaTime);
-    }
-
-    // Limpa o canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Desenha a comida primeiro (para a cobra ficar por cima)
-    if (food) {
-        try {
-            const foodTrack = tracks[food.trackIndex];
-            if (foodTrack) {
-                const img = await loadImage(foodTrack.image);
-                const pulse = Math.sin(Date.now() / 200) * 0.1 + 1; // Efeito de pulsação
-                const size = tileSize * pulse;
-                const offset = (tileSize - size) / 2;
-
-                // Desenha imagem circular
-                ctx.save();
-                ctx.beginPath();
-                ctx.arc(
-                    food.x * tileSize + tileSize / 2,
-                    food.y * tileSize + tileSize / 2,
-                    size / 2, // Raio
-                    0, Math.PI * 2
-                );
-                ctx.closePath();
-                ctx.clip(); // Aplica o clip circular
-                ctx.drawImage(img, food.x * tileSize + offset, food.y * tileSize + offset, size, size);
-                ctx.restore(); // Remove o clip
-
-                // Desenha borda pulsante
-                ctx.strokeStyle = `rgba(29, 185, 84, ${0.5 + Math.sin(Date.now() / 200) * 0.5})`;
-                ctx.lineWidth = 2;
-                // Ajuste para desenhar a borda no retângulo que contém o círculo
-                ctx.strokeRect(food.x * tileSize + offset, food.y * tileSize + offset, size, size);
-            } else {
-                console.warn(`Track não encontrada para comida no índice ${food.trackIndex}`);
-                // Desenha fallback se track não existir
-                ctx.fillStyle = 'red';
-                ctx.fillRect(food.x * tileSize, food.y * tileSize, tileSize, tileSize);
-            }
-        } catch(error) {
-            console.error("Erro ao desenhar comida:", error);
-            ctx.fillStyle = 'red'; // Fallback visual
-            ctx.fillRect(food.x * tileSize, food.y * tileSize, tileSize, tileSize);
-        }
-    }
-
-    // Desenha a cobra com posições visuais (animação suave)
+// Função para desenhar a cobra com interpolação e efeitos físicos
+async function drawSnake(t) {
     for (let i = 0; i < snake.length; i++) {
-        const segment = snake[i];
-        const trackIndex = snakeBodyInfo[i] !== undefined ? snakeBodyInfo[i] : 0; // Pega info do corpo ou usa 0
+        const s = snake[i];
+        
+        // Interpolação entre posição anterior e atual
+        const tx = s.px + (s.x - s.px) * t;
+        const ty = s.py + (s.y - s.py) * t;
+        
+        // Aplica o offset vertical (efeito de pulo)
+        const yOffset = s.offsetY * Math.min(1, t * 2);
+        
+        // Obtém o índice da música para este segmento
+        const trackIndex = snakeTracks[i] || 0;
+        
+        // Carrega a imagem da música
+        const img = await loadImage(tracks[trackIndex].image);
+        
+        // Calcula o offset para centralização
+        const offset = (baseTileSize - snakeTileSize) / 2;
+        
+        // Salva o contexto para transformações
+        ctx.save();
+        
+        // Translada para a posição do segmento
+        ctx.translate(
+            tx * baseTileSize + baseTileSize/2,
+            ty * baseTileSize + baseTileSize/2 + yOffset
+        );
+        
+        // Aplica escala baseada no offset (efeito de esticar quando pula)
+        const scale = 1 + Math.abs(yOffset)/150;
+        ctx.scale(scale, scale);
+        
+        // Desenha a imagem centralizada
+        ctx.drawImage(
+            img,
+            -snakeTileSize/2 + offset,
+            -snakeTileSize/2 + offset,
+            snakeTileSize,
+            snakeTileSize
+        );
+        
+        // Restaura o contexto
+        ctx.restore();
 
-        try {
-            const segmentTrack = tracks[trackIndex];
-            if (segmentTrack) {
-                const img = await loadImage(segmentTrack.image);
-                
-                // Usa as coordenadas visuais para desenho suave
-                ctx.drawImage(
-                    img, 
-                    segment.visualX * tileSize, 
-                    segment.visualY * tileSize, 
-                    tileSize, 
-                    tileSize
-                );
-
-                // Adiciona destaque na cabeça
-                if (i === 0) {
-                    ctx.strokeStyle = 'rgba(255,255,255,0.7)'; // Cor mais visível
-                    ctx.lineWidth = 2; // Linha mais grossa
-                    ctx.strokeRect(
-                        segment.visualX * tileSize, 
-                        segment.visualY * tileSize, 
-                        tileSize, 
-                        tileSize
-                    );
-                }
-            } else {
-                console.warn(`Track não encontrada para segmento da cobra no índice ${trackIndex}`);
-                ctx.fillStyle = i === 0 ? '#1DB954' : '#1ed760'; // Cor fallback
-                ctx.fillRect(
-                    segment.visualX * tileSize, 
-                    segment.visualY * tileSize, 
-                    tileSize, 
-                    tileSize
-                );
-            }
-        } catch(error) {
-            console.error("Erro ao desenhar segmento da cobra:", error);
-            ctx.fillStyle = i === 0 ? '#1DB954' : '#1ed760'; // Cor fallback
-            ctx.fillRect(
-                segment.visualX * tileSize, 
-                segment.visualY * tileSize, 
-                tileSize, 
-                tileSize
+        // Destaque especial para a cabeça
+        if (i === 0) {
+            ctx.strokeStyle = `rgba(255,255,255,${0.5 - Math.abs(yOffset)/100})`;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(
+                tx * baseTileSize + offset - 1,
+                ty * baseTileSize + offset - 1 + yOffset,
+                snakeTileSize + 2,
+                snakeTileSize + 2
             );
         }
     }
+}
 
-    // Chama o próximo frame de desenho
-    requestAnimationFrame(drawGame);
+// Função para desenhar a comida
+async function drawFood() {
+    if (!food) return;
+    
+    // Carrega a imagem da música
+    const img = await loadImage(tracks[food.trackIndex].image);
+    
+    // Efeito de pulsação
+    const pulse = Math.sin(Date.now() / 200) * 0.1 + 1;
+    const size = baseTileSize * pulse;
+    const offset = (baseTileSize - size) / 2;
+    
+    // Desenha a comida como um círculo
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(
+        food.x * baseTileSize + baseTileSize / 2,
+        food.y * baseTileSize + baseTileSize / 2,
+        size / 2,
+        0,
+        Math.PI * 2
+    );
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(img, food.x * baseTileSize + offset, food.y * baseTileSize + offset, size, size);
+    ctx.restore();
+    
+    // Desenha borda pulsante
+    ctx.strokeStyle = `rgba(29, 185, 84, ${0.5 + Math.sin(Date.now() / 200) * 0.5})`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(food.x * baseTileSize + offset, food.y * baseTileSize + offset, size, size);
 }
 
 // --- FUNÇÕES DE CONTROLE DO JOGO ---
@@ -442,11 +437,7 @@ function gameOver() {
     console.log("Game Over! Pontuação final:", score);
     gameStarted = false;
     stopPreview(); // Para a música
-    clearTimeout(gameLoopTimeout); // Para o loop de lógica
-    clearInterval(timerInterval); // Para o timer de tempo
-    updateNowPlaying(null); // Limpa o display "Now Playing"
-    document.removeEventListener('keydown', handleKeyDown); // Remove listener de teclado
-
+    
     // Adicionar mensagem visual de Game Over no canvas
     setTimeout(() => { // Pequeno delay para garantir que o último frame foi limpo
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
@@ -465,38 +456,101 @@ function gameOver() {
     startButton.textContent = 'Jogar Novamente';
 }
 
-function startGame() {
-    if (gameStarted) return; // Evita iniciar múltiplas vezes
+// Loop principal do jogo com física
+async function gameLoop(timestamp) {
+    if (!gameStarted) return;
 
+    // Calcula o delta time
+    const delta = timestamp - lastTime;
+    lastTime = timestamp;
+    
+    // Acumula o tempo para a física
+    accumulator += delta;
+
+    // Atualiza a física dos segmentos
+    updatePhysics();
+    
+    // Executa a lógica do jogo em intervalos fixos
+    while (accumulator >= moveInterval) {
+        // Verifica colisões
+        if (checkCollision()) return gameOver();
+        
+        // Atualiza a posição da cobra
+        updateSnake();
+        
+        // Verifica se comeu comida
+        checkFood();
+        
+        // Reduz o acumulador
+        accumulator -= moveInterval;
+    }
+
+    // Limpa o canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Desenha a cobra com interpolação
+    await drawSnake(accumulator / moveInterval);
+    
+    // Desenha a comida
+    await drawFood();
+    
+    // Atualiza o tempo de jogo
+    timeElement.textContent = `Tempo: ${formatTime(Math.floor((Date.now() - startTime)/1000))}`;
+    
+    // Agenda o próximo frame
+    requestAnimationFrame(gameLoop);
+}
+
+async function startGame() {
+    if (gameStarted) return;
+    
+    startButton.disabled = true;
+    startButton.textContent = 'Carregando...';
+    
+    // Busca as músicas se ainda não tiver
+    if (!tracks || tracks.length === 0) {
+        tracks = await fetchTracks();
+        
+        if (tracks.length === 0) {
+            startButton.disabled = false;
+            startButton.textContent = 'Tentar Novamente';
+            return; // Não inicia o jogo se não tiver músicas
+        }
+    }
+    
     // Reseta o jogo
-    snake = [{ x: 5, y: 5, visualX: 5, visualY: 5 }];
-    snakeBodyInfo = [0];
-    currentDirection = 'right';
-    nextDirection = 'right';
+    snake = [{ x: 5, y: 5, px: 5, py: 5, offsetY: 0 }];
+    snakeTracks = [0]; // Começa com a primeira música
+    currentDirection = nextDirection = 'right';
     score = 0;
-    moveInterval = INITIAL_INTERVAL;
-    lastUpdateTime = 0;
+    grow = 0;
+    moveInterval = 150;
     
     if (scoreSpan) scoreSpan.textContent = '0';
     
+    // Para qualquer áudio anterior
+    stopPreview();
+    
     // Inicia o timer
     startTime = Date.now();
-    clearInterval(timerInterval);
-    timerInterval = setInterval(() => {
-        const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
-        timeElement.textContent = `Tempo: ${formatTime(elapsedSeconds)}`;
-    }, 1000);
+    timeElement.textContent = 'Tempo: 00:00';
+    
+    // Toca a primeira música
+    if (tracks[0].preview) {
+        playPreview(tracks[0].preview);
+    }
+    
+    // Atualiza o display Now Playing
+    updateNowPlaying(tracks[0]);
     
     // Gera a primeira comida
     food = generateFood();
     
     // Inicia o loop do jogo
     gameStarted = true;
-    updateGame();
-    requestAnimationFrame(drawGame);
-    
-    // Adiciona listener de teclado
-    document.addEventListener('keydown', handleKeyDown);
+    lastTime = performance.now();
+    accumulator = 0;
+    requestAnimationFrame(gameLoop);
     
     // Atualiza o botão
     startButton.disabled = true;
@@ -513,59 +567,50 @@ function handleKeyDown(e) {
         e.preventDefault();
     }
     
-    // Atualiza a direção baseado na tecla pressionada
-    // Não permite voltar na direção oposta (isso mataria a cobra instantaneamente)
-    switch (e.key) {
-        case 'ArrowUp':
-        case 'w':
-        case 'W':
-            if (currentDirection !== 'down') nextDirection = 'up';
-            break;
-        case 'ArrowDown':
-        case 's':
-        case 'S':
-            if (currentDirection !== 'up') nextDirection = 'down';
-            break;
-        case 'ArrowLeft':
-        case 'a':
-        case 'A':
-            if (currentDirection !== 'right') nextDirection = 'left';
-            break;
-        case 'ArrowRight':
-        case 'd':
-        case 'D':
-            if (currentDirection !== 'left') nextDirection = 'right';
-            break;
+    // Mapeamento de teclas para direções
+    const directions = {
+        ArrowUp: 'up',
+        ArrowDown: 'down',
+        ArrowLeft: 'left',
+        ArrowRight: 'right',
+        w: 'up',
+        s: 'down',
+        a: 'left',
+        d: 'right',
+        W: 'up',
+        S: 'down',
+        A: 'left',
+        D: 'right'
+    };
+    
+    // Obtém a nova direção
+    const newDir = directions[e.key];
+    if (!newDir) return;
+    
+    // Mapeamento de direções opostas
+    const opposite = {
+        up: 'down',
+        down: 'up',
+        left: 'right',
+        right: 'left'
+    };
+    
+    // Não permite voltar na direção oposta
+    if (newDir !== opposite[currentDirection]) {
+        nextDirection = newDir;
     }
 }
 
 // --- INICIALIZAÇÃO ---
 
 // Adiciona event listeners
-startButton.addEventListener('click', async () => {
-    if (gameStarted) return; // Não faz nada se já estiver jogando
-    
-    startButton.disabled = true;
-    startButton.textContent = 'Carregando...';
-    
-    // Busca as músicas se ainda não tiver
-    if (!tracks || tracks.length === 0) {
-        tracks = await fetchTracks();
-        
-        if (tracks.length === 0) {
-            startButton.disabled = false;
-            startButton.textContent = 'Tentar Novamente';
-            return; // Não inicia o jogo se não tiver músicas
-        }
-    }
-    
-    // Inicia o jogo
-    startGame();
-});
+startButton.addEventListener('click', startGame);
+
+// Adiciona listener de teclado
+document.addEventListener('keydown', handleKeyDown);
 
 // Inicializa o jogo (apenas prepara, não começa)
 updateNowPlaying(null); // Limpa o display "Now Playing"
-requestAnimationFrame(drawGame); // Inicia o loop de desenho
 
 // Adiciona suporte a touch para dispositivos móveis
 let touchStartX = 0;
@@ -618,3 +663,134 @@ startButton.addEventListener('touchstart', function(e) {
     e.preventDefault(); // Previne comportamento padrão
     this.click(); // Simula um clique
 }, { passive: false });
+
+// Adiciona suporte aos botões de controle touch
+document.addEventListener('DOMContentLoaded', function() {
+    // Verifica se os elementos existem
+    const touchUp = document.getElementById('touch-up');
+    const touchDown = document.getElementById('touch-down');
+    const touchLeft = document.getElementById('touch-left');
+    const touchRight = document.getElementById('touch-right');
+    
+    if (touchUp) {
+        touchUp.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            if (gameStarted && currentDirection !== 'down') nextDirection = 'up';
+        });
+    }
+    
+    if (touchDown) {
+        touchDown.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            if (gameStarted && currentDirection !== 'up') nextDirection = 'down';
+        });
+    }
+    
+    if (touchLeft) {
+        touchLeft.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            if (gameStarted && currentDirection !== 'right') nextDirection = 'left';
+        });
+    }
+    
+    if (touchRight) {
+        touchRight.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            if (gameStarted && currentDirection !== 'left') nextDirection = 'right';
+        });
+    }
+});
+
+// Função para processar estatísticas do Last.fm
+async function processLastfmStats(username) {
+    if (!username) return;
+    
+    try {
+        const statsContainer = document.getElementById('stats-container');
+        const statsContent = document.getElementById('stats-content');
+        
+        if (!statsContainer || !statsContent) return;
+        
+        // Mostra feedback de carregamento
+        statsContent.innerHTML = '<p>Carregando estatísticas...</p>';
+        statsContainer.classList.add('active');
+        
+        // Busca estatísticas do Last.fm
+        const response = await fetch(`/api/lastfm/stats?username=${encodeURIComponent(username)}`);
+        
+        if (!response.ok) {
+            throw new Error(`Erro ao buscar estatísticas: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Verifica se há dados de top tracks
+        if (!data.top_tracks || data.top_tracks.length === 0) {
+            statsContent.innerHTML = '<p>Nenhuma estatística encontrada para este usuário.</p>';
+            return;
+        }
+        
+        // Renderiza as top tracks
+        let html = '';
+        
+        data.top_tracks.forEach(track => {
+            html += `
+            <div class="stats-item">
+                <img src="${track.image || 'https://via.placeholder.com/50?text=?'}" alt="${track.name}">
+                <div class="stats-item-info">
+                    <div class="stats-item-name">${track.name}</div>
+                    <div class="stats-item-artist">${track.artist}</div>
+                </div>
+                <div class="stats-item-plays">${track.playcount}×</div>
+            </div>`;
+        });
+        
+        statsContent.innerHTML = html;
+        statsContainer.classList.add('active');
+        
+    } catch (error) {
+        console.error('Erro ao processar estatísticas do Last.fm:', error);
+        const statsContent = document.getElementById('stats-content');
+        if (statsContent) {
+            statsContent.innerHTML = `<p>Erro ao carregar estatísticas: ${error.message}</p>`;
+        }
+    }
+}
+
+// Adiciona event listener para o formulário do Last.fm
+document.addEventListener('DOMContentLoaded', function() {
+    const lastfmForm = document.getElementById('lastfm-form');
+    const lastfmSubmit = document.getElementById('lastfm-submit');
+    const lastfmUsername = document.getElementById('lastfm-username');
+    
+    if (lastfmForm && lastfmSubmit && lastfmUsername) {
+        lastfmSubmit.addEventListener('click', function(e) {
+            e.preventDefault();
+            const username = lastfmUsername.value.trim();
+            if (username) {
+                processLastfmStats(username);
+                
+                // Salva o username na sessão (opcional)
+                fetch('/api/lastfm/save-username', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username })
+                }).catch(err => console.error('Erro ao salvar username:', err));
+            }
+        });
+        
+        // Carrega username salvo (se existir)
+        fetch('/api/lastfm/get-username')
+            .then(res => res.json())
+            .then(data => {
+                if (data.has_username) {
+                    lastfmUsername.value = data.username;
+                    // Opcionalmente, carrega estatísticas automaticamente
+                    processLastfmStats(data.username);
+                }
+            })
+            .catch(err => console.error('Erro ao carregar username:', err));
+    }
+});
