@@ -28,7 +28,7 @@ let gameLoopTimeout = null; // Para controlar o loop com setTimeout
 let timerInterval = null; // Para o timer de tempo de jogo
 let lastUpdateTime = 0; // Para animação suave
 let animationSpeed = 0.3; // Velocidade da animação (ajustada para movimento mais natural)
-let segmentSpacing = 0.2; // Espaçamento entre segmentos da cobra (0-1, quanto maior mais espaçado)
+let segmentSpacing = 0.3; // Espaçamento entre segmentos da cobra (0-1, quanto maior mais espaçado)
 
 // Constantes de Grid e Tamanho
 const gridSize = 20; // Número de células na largura/altura
@@ -326,15 +326,26 @@ function updateGame() {
         updateNowPlaying(eatenTrack); // ATUALIZA O DISPLAY
         playPreview(eatenTrack?.preview); // TOCA O PREVIEW
 
-        // Adiciona a info da track comida ao corpo da cobra
-        snakeBodyInfo.unshift(food.trackIndex);
+        // Adiciona a info da track comida ao FINAL da cobra (não ao início)
+        // Isso garante que as músicas mais recentes fiquem no final da cobra
+        snakeBodyInfo.push(food.trackIndex);
+        
+        // Cria um novo segmento no final da cobra
+        const lastSegment = snake[snake.length - 1];
+        const newSegment = { 
+            x: lastSegment.x, 
+            y: lastSegment.y,
+            visualX: lastSegment.visualX,
+            visualY: lastSegment.visualY
+        };
+        
+        // Adiciona o novo segmento ao final da cobra
+        snake.push(newSegment);
 
         // Acelera o jogo
         moveInterval = Math.max(MIN_INTERVAL, moveInterval * ACCELERATION_FACTOR);
 
         food = generateFood(); // Gera nova comida
-
-        // Cobra cresceu, não remove a cauda
     } else {
         // Cobra não comeu, remove a cauda para dar efeito de movimento
         snake.pop();
@@ -410,9 +421,14 @@ async function drawGame(timestamp) {
     }
 
     // Desenha a cobra com posições visuais (animação suave)
-    for (let i = 0; i < snake.length; i++) {
+    // Desenha do final para o início para que a cabeça fique por cima
+    for (let i = snake.length - 1; i >= 0; i--) {
         const segment = snake[i];
-        const trackIndex = snakeBodyInfo[i] !== undefined ? snakeBodyInfo[i] : 0; // Pega info do corpo ou usa 0
+        // Usa o índice correto para o segmento
+        // Para a cabeça, usa o primeiro índice
+        // Para o corpo, usa os índices na ordem correta
+        const trackIndex = i === 0 ? snakeBodyInfo[0] : 
+                          (i < snakeBodyInfo.length ? snakeBodyInfo[snakeBodyInfo.length - i] : 0);
 
         try {
             const segmentTrack = tracks[trackIndex];
@@ -421,7 +437,7 @@ async function drawGame(timestamp) {
                 
                 // Usa as coordenadas visuais para desenho suave
                 // Reduz ligeiramente o tamanho para criar espaçamento visual
-                const segmentSize = i === 0 ? tileSize : tileSize * 0.9; // Cabeça normal, corpo ligeiramente menor
+                const segmentSize = i === 0 ? tileSize : tileSize * 0.85; // Cabeça normal, corpo menor
                 const offset = (tileSize - segmentSize) / 2;
                 
                 ctx.drawImage(
@@ -686,5 +702,99 @@ document.addEventListener('DOMContentLoaded', function() {
             e.preventDefault();
             if (gameStarted && currentDirection !== 'left') nextDirection = 'right';
         });
+    }
+});
+
+// Função para processar estatísticas do Last.fm
+async function processLastfmStats(username) {
+    if (!username) return;
+    
+    try {
+        const statsContainer = document.getElementById('stats-container');
+        const statsContent = document.getElementById('stats-content');
+        
+        if (!statsContainer || !statsContent) return;
+        
+        // Mostra feedback de carregamento
+        statsContent.innerHTML = '<p>Carregando estatísticas...</p>';
+        statsContainer.classList.add('active');
+        
+        // Busca estatísticas do Last.fm
+        const response = await fetch(`/api/lastfm/stats?username=${encodeURIComponent(username)}`);
+        
+        if (!response.ok) {
+            throw new Error(`Erro ao buscar estatísticas: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Verifica se há dados de top tracks
+        if (!data.top_tracks || data.top_tracks.length === 0) {
+            statsContent.innerHTML = '<p>Nenhuma estatística encontrada para este usuário.</p>';
+            return;
+        }
+        
+        // Renderiza as top tracks
+        let html = '';
+        
+        data.top_tracks.forEach(track => {
+            html += `
+            <div class="stats-item">
+                <img src="${track.image || 'https://via.placeholder.com/50?text=?'}" alt="${track.name}">
+                <div class="stats-item-info">
+                    <div class="stats-item-name">${track.name}</div>
+                    <div class="stats-item-artist">${track.artist}</div>
+                </div>
+                <div class="stats-item-plays">${track.playcount}×</div>
+            </div>`;
+        });
+        
+        statsContent.innerHTML = html;
+        statsContainer.classList.add('active');
+        
+    } catch (error) {
+        console.error('Erro ao processar estatísticas do Last.fm:', error);
+        const statsContent = document.getElementById('stats-content');
+        if (statsContent) {
+            statsContent.innerHTML = `<p>Erro ao carregar estatísticas: ${error.message}</p>`;
+        }
+    }
+}
+
+// Adiciona event listener para o formulário do Last.fm
+document.addEventListener('DOMContentLoaded', function() {
+    const lastfmForm = document.getElementById('lastfm-form');
+    const lastfmSubmit = document.getElementById('lastfm-submit');
+    const lastfmUsername = document.getElementById('lastfm-username');
+    
+    if (lastfmForm && lastfmSubmit && lastfmUsername) {
+        lastfmSubmit.addEventListener('click', function(e) {
+            e.preventDefault();
+            const username = lastfmUsername.value.trim();
+            if (username) {
+                processLastfmStats(username);
+                
+                // Salva o username na sessão (opcional)
+                fetch('/api/lastfm/save-username', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username })
+                }).catch(err => console.error('Erro ao salvar username:', err));
+            }
+        });
+        
+        // Carrega username salvo (se existir)
+        fetch('/api/lastfm/get-username')
+            .then(res => res.json())
+            .then(data => {
+                if (data.has_username) {
+                    lastfmUsername.value = data.username;
+                    // Opcionalmente, carrega estatísticas automaticamente
+                    processLastfmStats(data.username);
+                }
+            })
+            .catch(err => console.error('Erro ao carregar username:', err));
     }
 });
