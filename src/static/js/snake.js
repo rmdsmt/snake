@@ -1,4 +1,4 @@
-// snake.js - Versão final com movimentação suave e ordem aleatória de músicas
+// snake.js - Versão adaptada com movimentação suave
 
 // --- SELEÇÃO DE ELEMENTOS DO DOM ---
 const canvas = document.getElementById('snake-canvas');
@@ -27,8 +27,7 @@ let startTime = 0;
 let gameLoopTimeout = null; // Para controlar o loop com setTimeout
 let timerInterval = null; // Para o timer de tempo de jogo
 let lastUpdateTime = 0; // Para animação suave
-let animationSpeed = 0.3; // Velocidade da animação (ajustada para movimento mais natural)
-let segmentSpacing = 0.3; // Espaçamento entre segmentos da cobra (0-1, quanto maior mais espaçado)
+let animationSpeed = 0.15; // Velocidade da animação (0-1, quanto maior mais rápido)
 
 // Constantes de Grid e Tamanho
 const gridSize = 20; // Número de células na largura/altura
@@ -37,8 +36,8 @@ canvas.width = gridSize * tileSize;
 canvas.height = gridSize * tileSize;
 
 // Constantes de aceleração
-const INITIAL_INTERVAL = 180; // Velocidade inicial (ms)
-const MIN_INTERVAL = 80; // Velocidade máxima (ms)
+const INITIAL_INTERVAL = 220; // Velocidade inicial (ms) - um pouco mais lenta para animação suave
+const MIN_INTERVAL = 100; // Velocidade máxima (ms) - um pouco mais lenta para animação suave
 const ACCELERATION_FACTOR = 0.98; // Quanto mais perto de 1, mais lenta a aceleração
 let moveInterval = INITIAL_INTERVAL; // Velocidade atual
 
@@ -55,7 +54,7 @@ function formatTime(totalSeconds) {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
-// Função shuffle para garantir ordem aleatória das músicas
+// Função shuffle
 function shuffleArray(array) {
   const newArray = [...array];
   for (let i = newArray.length - 1; i > 0; i--) {
@@ -173,10 +172,6 @@ async function fetchTracks() {
             throw new Error(`Poucas músicas (${data.length}) encontradas para jogar.`);
         }
 
-        // Embaralha as músicas para garantir ordem aleatória
-        data = shuffleArray(data);
-        console.log("Músicas embaralhadas para ordem aleatória");
-
         // Pré-carrega imagens (opcional, mas melhora performance visual)
         await Promise.all(data.map(track => loadImage(track.image)));
 
@@ -244,36 +239,12 @@ function checkCollision() {
 
 // Função para atualizar as coordenadas visuais (animação suave)
 function updateVisualPositions(deltaTime) {
-    // Atualiza a cabeça primeiro
-    const head = snake[0];
-    const dx = head.x - head.visualX;
-    const dy = head.y - head.visualY;
-    
-    head.visualX += dx * animationSpeed * deltaTime;
-    head.visualY += dy * animationSpeed * deltaTime;
-    
-    // Depois atualiza o resto do corpo com espaçamento
-    for (let i = 1; i < snake.length; i++) {
+    for (let i = 0; i < snake.length; i++) {
         const segment = snake[i];
-        const prevSegment = snake[i-1];
         
-        // Calcula a posição alvo com espaçamento
-        // Quanto maior o segmentSpacing, mais espaço entre os segmentos
-        const dirX = prevSegment.x - segment.x;
-        const dirY = prevSegment.y - segment.y;
-        
-        // Normaliza a direção
-        const length = Math.sqrt(dirX * dirX + dirY * dirY);
-        const normX = length > 0 ? dirX / length : 0;
-        const normY = length > 0 ? dirY / length : 0;
-        
-        // Posição alvo com espaçamento
-        const targetX = prevSegment.visualX - normX * segmentSpacing;
-        const targetY = prevSegment.visualY - normY * segmentSpacing;
-        
-        // Calcula a diferença entre posição atual e alvo
-        const dx = targetX - segment.visualX;
-        const dy = targetY - segment.visualY;
+        // Calcula a diferença entre posição real e visual
+        const dx = segment.x - segment.visualX;
+        const dy = segment.y - segment.visualY;
         
         // Atualiza posição visual com interpolação suave
         segment.visualX += dx * animationSpeed * deltaTime;
@@ -295,9 +266,9 @@ function updateGame() {
         case 'right': head.x += 1; break;
     }
 
-    // Adiciona coordenadas visuais para a nova cabeça
-    head.visualX = snake[0].x; // Usa a posição anterior da cabeça como ponto de partida
-    head.visualY = snake[0].y; // Isso cria um efeito mais suave
+    // Adiciona coordenadas visuais iguais às reais para a nova cabeça
+    head.visualX = snake[0].visualX;
+    head.visualY = snake[0].visualY;
 
     // --- Verifica Colisões ---
     // Colisão com paredes
@@ -326,26 +297,15 @@ function updateGame() {
         updateNowPlaying(eatenTrack); // ATUALIZA O DISPLAY
         playPreview(eatenTrack?.preview); // TOCA O PREVIEW
 
-        // Adiciona a info da track comida ao FINAL da cobra (não ao início)
-        // Isso garante que as músicas mais recentes fiquem no final da cobra
-        snakeBodyInfo.push(food.trackIndex);
-        
-        // Cria um novo segmento no final da cobra
-        const lastSegment = snake[snake.length - 1];
-        const newSegment = { 
-            x: lastSegment.x, 
-            y: lastSegment.y,
-            visualX: lastSegment.visualX,
-            visualY: lastSegment.visualY
-        };
-        
-        // Adiciona o novo segmento ao final da cobra
-        snake.push(newSegment);
+        // Adiciona a info da track comida ao corpo da cobra
+        snakeBodyInfo.unshift(food.trackIndex);
 
         // Acelera o jogo
         moveInterval = Math.max(MIN_INTERVAL, moveInterval * ACCELERATION_FACTOR);
 
         food = generateFood(); // Gera nova comida
+
+        // Cobra cresceu, não remove a cauda
     } else {
         // Cobra não comeu, remove a cauda para dar efeito de movimento
         snake.pop();
@@ -421,14 +381,9 @@ async function drawGame(timestamp) {
     }
 
     // Desenha a cobra com posições visuais (animação suave)
-    // Desenha do final para o início para que a cabeça fique por cima
-    for (let i = snake.length - 1; i >= 0; i--) {
+    for (let i = 0; i < snake.length; i++) {
         const segment = snake[i];
-        // Usa o índice correto para o segmento
-        // Para a cabeça, usa o primeiro índice
-        // Para o corpo, usa os índices na ordem correta
-        const trackIndex = i === 0 ? snakeBodyInfo[0] : 
-                          (i < snakeBodyInfo.length ? snakeBodyInfo[snakeBodyInfo.length - i] : 0);
+        const trackIndex = snakeBodyInfo[i] !== undefined ? snakeBodyInfo[i] : 0; // Pega info do corpo ou usa 0
 
         try {
             const segmentTrack = tracks[trackIndex];
@@ -436,16 +391,12 @@ async function drawGame(timestamp) {
                 const img = await loadImage(segmentTrack.image);
                 
                 // Usa as coordenadas visuais para desenho suave
-                // Reduz ligeiramente o tamanho para criar espaçamento visual
-                const segmentSize = i === 0 ? tileSize : tileSize * 0.85; // Cabeça normal, corpo menor
-                const offset = (tileSize - segmentSize) / 2;
-                
                 ctx.drawImage(
                     img, 
-                    Math.round(segment.visualX * tileSize + offset), 
-                    Math.round(segment.visualY * tileSize + offset), 
-                    segmentSize, 
-                    segmentSize
+                    segment.visualX * tileSize, 
+                    segment.visualY * tileSize, 
+                    tileSize, 
+                    tileSize
                 );
 
                 // Adiciona destaque na cabeça
@@ -453,8 +404,8 @@ async function drawGame(timestamp) {
                     ctx.strokeStyle = 'rgba(255,255,255,0.7)'; // Cor mais visível
                     ctx.lineWidth = 2; // Linha mais grossa
                     ctx.strokeRect(
-                        Math.round(segment.visualX * tileSize), 
-                        Math.round(segment.visualY * tileSize), 
+                        segment.visualX * tileSize, 
+                        segment.visualY * tileSize, 
                         tileSize, 
                         tileSize
                     );
@@ -463,8 +414,8 @@ async function drawGame(timestamp) {
                 console.warn(`Track não encontrada para segmento da cobra no índice ${trackIndex}`);
                 ctx.fillStyle = i === 0 ? '#1DB954' : '#1ed760'; // Cor fallback
                 ctx.fillRect(
-                    Math.round(segment.visualX * tileSize), 
-                    Math.round(segment.visualY * tileSize), 
+                    segment.visualX * tileSize, 
+                    segment.visualY * tileSize, 
                     tileSize, 
                     tileSize
                 );
@@ -473,8 +424,8 @@ async function drawGame(timestamp) {
             console.error("Erro ao desenhar segmento da cobra:", error);
             ctx.fillStyle = i === 0 ? '#1DB954' : '#1ed760'; // Cor fallback
             ctx.fillRect(
-                Math.round(segment.visualX * tileSize), 
-                Math.round(segment.visualY * tileSize), 
+                segment.visualX * tileSize, 
+                segment.visualY * tileSize, 
                 tileSize, 
                 tileSize
             );
@@ -667,134 +618,3 @@ startButton.addEventListener('touchstart', function(e) {
     e.preventDefault(); // Previne comportamento padrão
     this.click(); // Simula um clique
 }, { passive: false });
-
-// Adiciona suporte aos botões de controle touch
-document.addEventListener('DOMContentLoaded', function() {
-    // Verifica se os elementos existem
-    const touchUp = document.getElementById('touch-up');
-    const touchDown = document.getElementById('touch-down');
-    const touchLeft = document.getElementById('touch-left');
-    const touchRight = document.getElementById('touch-right');
-    
-    if (touchUp) {
-        touchUp.addEventListener('touchstart', function(e) {
-            e.preventDefault();
-            if (gameStarted && currentDirection !== 'down') nextDirection = 'up';
-        });
-    }
-    
-    if (touchDown) {
-        touchDown.addEventListener('touchstart', function(e) {
-            e.preventDefault();
-            if (gameStarted && currentDirection !== 'up') nextDirection = 'down';
-        });
-    }
-    
-    if (touchLeft) {
-        touchLeft.addEventListener('touchstart', function(e) {
-            e.preventDefault();
-            if (gameStarted && currentDirection !== 'right') nextDirection = 'left';
-        });
-    }
-    
-    if (touchRight) {
-        touchRight.addEventListener('touchstart', function(e) {
-            e.preventDefault();
-            if (gameStarted && currentDirection !== 'left') nextDirection = 'right';
-        });
-    }
-});
-
-// Função para processar estatísticas do Last.fm
-async function processLastfmStats(username) {
-    if (!username) return;
-    
-    try {
-        const statsContainer = document.getElementById('stats-container');
-        const statsContent = document.getElementById('stats-content');
-        
-        if (!statsContainer || !statsContent) return;
-        
-        // Mostra feedback de carregamento
-        statsContent.innerHTML = '<p>Carregando estatísticas...</p>';
-        statsContainer.classList.add('active');
-        
-        // Busca estatísticas do Last.fm
-        const response = await fetch(`/api/lastfm/stats?username=${encodeURIComponent(username)}`);
-        
-        if (!response.ok) {
-            throw new Error(`Erro ao buscar estatísticas: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        
-        // Verifica se há dados de top tracks
-        if (!data.top_tracks || data.top_tracks.length === 0) {
-            statsContent.innerHTML = '<p>Nenhuma estatística encontrada para este usuário.</p>';
-            return;
-        }
-        
-        // Renderiza as top tracks
-        let html = '';
-        
-        data.top_tracks.forEach(track => {
-            html += `
-            <div class="stats-item">
-                <img src="${track.image || 'https://via.placeholder.com/50?text=?'}" alt="${track.name}">
-                <div class="stats-item-info">
-                    <div class="stats-item-name">${track.name}</div>
-                    <div class="stats-item-artist">${track.artist}</div>
-                </div>
-                <div class="stats-item-plays">${track.playcount}×</div>
-            </div>`;
-        });
-        
-        statsContent.innerHTML = html;
-        statsContainer.classList.add('active');
-        
-    } catch (error) {
-        console.error('Erro ao processar estatísticas do Last.fm:', error);
-        const statsContent = document.getElementById('stats-content');
-        if (statsContent) {
-            statsContent.innerHTML = `<p>Erro ao carregar estatísticas: ${error.message}</p>`;
-        }
-    }
-}
-
-// Adiciona event listener para o formulário do Last.fm
-document.addEventListener('DOMContentLoaded', function() {
-    const lastfmForm = document.getElementById('lastfm-form');
-    const lastfmSubmit = document.getElementById('lastfm-submit');
-    const lastfmUsername = document.getElementById('lastfm-username');
-    
-    if (lastfmForm && lastfmSubmit && lastfmUsername) {
-        lastfmSubmit.addEventListener('click', function(e) {
-            e.preventDefault();
-            const username = lastfmUsername.value.trim();
-            if (username) {
-                processLastfmStats(username);
-                
-                // Salva o username na sessão (opcional)
-                fetch('/api/lastfm/save-username', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ username })
-                }).catch(err => console.error('Erro ao salvar username:', err));
-            }
-        });
-        
-        // Carrega username salvo (se existir)
-        fetch('/api/lastfm/get-username')
-            .then(res => res.json())
-            .then(data => {
-                if (data.has_username) {
-                    lastfmUsername.value = data.username;
-                    // Opcionalmente, carrega estatísticas automaticamente
-                    processLastfmStats(data.username);
-                }
-            })
-            .catch(err => console.error('Erro ao carregar username:', err));
-    }
-});
