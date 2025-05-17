@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MNZ Snake - Spotify & Deezer</title>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Poppins:wght@300;500;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --spotify-green: #1DB954;
+      --spotify-dark: #191414;
+      --spotify-light: #FFFFFF;
+      --spotify-gray: #535353;
+      --spotify-light-gray: #B3B3B3;
+      --glow-color: rgba(29, 185, 84, 0.6);
+      --deezer-blue: #00C7F2;
+    }
+
+    /* --- ESTILOS EXISTENTES (mantidos) --- */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      margin: 0;
+      font-family: 'Poppins', sans-serif;
+      background: linear-gradient(135deg, var(--spotify-dark), #000);
+      color: var(--spotify-light);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      overflow: hidden;
+      position: relative;
+    }
+    body::before { /* Efeito de brilho giratório */
+      content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
+      background: radial-gradient(circle, transparent 0%, var(--glow-color) 70%);
+      opacity: 0.2; animation: rotate 20s linear infinite; z-index: -1;
+    }
+    @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+    #game-container {
+      text-align: center; padding: 2rem; background: rgba(25, 20, 20, 0.8);
+      border-radius: 20px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1);
+      max-width: 500px; width: 95%; /* Pequeno ajuste para telas menores */
+      position: relative; overflow: hidden;
+    }
+    #game-container::after { /* Barra superior animada */
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px;
+      background: linear-gradient(90deg, var(--spotify-green), var(--deezer-blue), var(--spotify-green));
+      animation: rainbow 3s linear infinite; background-size: 200% auto;
+    }
+    @keyframes rainbow { 0% { background-position: 0% center; } 100% { background-position: 200% center; } }
+
+    h1 { /* Estilo do título */
+      font-size: 2.5rem; margin-bottom: 0.5rem; /* Reduzido margin */
+      font-family: 'Montserrat', sans-serif; font-weight: 700;
+      background: linear-gradient(to right, var(--spotify-green), var(--deezer-blue));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 10px rgba(29, 185, 84, 0.3);
+      display: inline-block; /* Para alinhar com a imagem */
+      vertical-align: middle; /* Para alinhar com a imagem */
+    }
+    /* Estilo para a imagem do urso ao lado do título */
+    #title-icon {
+        width: 40px;
+        height: 40px; /* Garante tamanho consistente */
+        vertical-align: middle; /* Alinha com o texto h1 */
+        margin-right: 10px; /* Espaço entre imagem e texto */
+    }
+
+    canvas { /* Estilo do canvas */
+      background-color: rgba(30, 30, 30, 0.7); border: 2px solid var(--spotify-gray);
+      border-radius: 15px; display: block; margin: 1.5rem auto;
+      box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3); transition: all 0.3s ease;
+      image-rendering: pixelated; /* Mantém pixel art */
+      max-width: 100%; /* Responsividade */
+      height: auto; /* Responsividade */
+    }
+    canvas:hover { transform: scale(1.02); border-color: var(--spotify-green); box-shadow: 0 5px 20px var(--glow-color); }
+
+    #score { margin: 1rem 0; font-size: 1.3rem; font-weight: 600; color: var(--spotify-light-gray); }
+    #time { font-family: 'Courier New', monospace; font-size: 1rem; color: #1db954; margin-bottom: 1rem; } /* Ajustado */
+
+    /* --- NOVOS ESTILOS / MODIFICAÇÕES PARA "NOW PLAYING" --- */
+    #now-playing {
+      margin: 1rem 0;
+      padding: 10px; /* Ajustado padding */
+      background: rgba(30, 30, 30, 0.7);
+      border-radius: 10px;
+      border: 1px solid var(--spotify-gray); /* Adicionado borda sutil */
+      transition: all 0.5s ease;
+      min-height: 74px; /* Altura para acomodar imagem 64px + padding */
+      display: flex; /* Usa flexbox para alinhar imagem e texto */
+      align-items: center; /* Centraliza verticalmente */
+      gap: 12px; /* Espaço entre imagem e texto */
+      overflow: hidden; /* Garante que nada vaze */
+      opacity: 0.8; /* Leve transparência inicial */
+    }
+
+    #now-playing.active { /* Quando uma música está tocando */
+      opacity: 1;
+      border-color: var(--spotify-green);
+      background: rgba(29, 185, 84, 0.1);
+      box-shadow: 0 0 10px var(--glow-color);
+      animation: pulse 1.5s infinite;
+    }
+
+    #now-playing-art {
+      width: 50px; /* Tamanho da imagem da capa */
+      height: 50px;
+      border-radius: 6px; /* Bordas levemente arredondadas */
+      object-fit: cover; /* Garante que a imagem cubra a área */
+      flex-shrink: 0; /* Impede que a imagem encolha */
+      background-color: var(--spotify-gray); /* Fundo enquanto carrega */
+    }
+
+    #now-playing-info {
+      display: flex;
+      flex-direction: column; /* Coloca Título acima do Artista */
+      justify-content: center; /* Centraliza texto verticalmente se houver espaço */
+      flex-grow: 1; /* Faz ocupar o espaço restante */
+      text-align: left; /* Alinha texto à esquerda */
+      overflow: hidden; /* Impede overflow do texto */
+    }
+
+    #now-playing-track {
+      font-size: 1rem;
+      font-weight: 600; /* Título em negrito */
+      color: var(--spotify-light);
+      white-space: nowrap; /* Não quebra linha */
+      overflow: hidden; /* Esconde o que não cabe */
+      text-overflow: ellipsis; /* Adiciona "..." */
+    }
+
+    #now-playing-artist {
+      font-size: 0.9rem;
+      color: var(--spotify-light-gray);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    @keyframes pulse { 0% { transform: scale(1); box-shadow: 0 0 8px var(--glow-color);} 50% { transform: scale(1.01); box-shadow: 0 0 15px var(--glow-color); } 100% { transform: scale(1); box-shadow: 0 0 8px var(--glow-color); } }
+
+
+    /* --- NOVOS ESTILOS PARA SELETOR DE PERÍODO --- */
+    #period-selector {
+        margin: 1rem 0 1.5rem 0; /* Espaçamento */
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 15px; /* Espaço entre as opções */
+        flex-wrap: wrap; /* Quebra linha se não couber */
+    }
+
+    #period-selector label {
+        cursor: pointer;
+        padding: 8px 15px;
+        border-radius: 20px;
+        background-color: rgba(50, 50, 50, 0.5);
+        transition: background-color 0.3s ease;
+        font-size: 0.9rem;
+        border: 1px solid transparent;
+    }
+
+    #period-selector input[type="radio"] {
+        display: none; /* Esconde o botão de rádio padrão */
+    }
+
+    #period-selector input[type="radio"]:checked + span { /* Estilo quando selecionado */
+        color: var(--spotify-green);
+        font-weight: 600;
+    }
+
+    #period-selector label:hover {
+        background-color: rgba(70, 70, 70, 0.7);
+    }
+
+    #period-selector input[type="radio"]:checked + span::before { /* Indicador visual (opcional) */
+      content: '● ';
+      color: var(--spotify-green);
+      margin-right: 4px;
+    }
+
+    /* --- ESTILOS PARA LOGIN --- */
+    #login-container {
+      text-align: center;
+      padding: 2rem;
+      max-width: 500px;
+      width: 95%;
+      margin: 0 auto;
+    }
+
+    .login-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background-color: var(--spotify-green);
+      color: white;
+      padding: 12px 24px;
+      border-radius: 30px;
+      font-weight: 600;
+      text-decoration: none;
+      margin: 10px 0;
+      transition: all 0.3s ease;
+      border: none;
+      cursor: pointer;
+      font-size: 1rem;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+
+    .login-button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 15px rgba(0,0,0,0.3);
+    }
+
+    .login-button img {
+      width: 24px;
+      height: 24px;
+      margin-right: 10px;
+    }
+
+    .login-info {
+      margin: 20px 0;
+      padding: 15px;
+      background: rgba(40, 40, 40, 0.6);
+      border-radius: 10px;
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    .user-profile {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+      padding: 10px;
+      background: rgba(40, 40, 40, 0.4);
+      border-radius: 10px;
+    }
+
+    .user-profile img {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      margin-right: 10px;
+    }
+
+    .user-name {
+      font-weight: 600;
+      color: var(--spotify-light);
+    }
+
+    .logout-link {
+      color: var(--spotify-light-gray);
+      text-decoration: underline;
+      font-size: 0.8rem;
+      margin-left: 10px;
+    }
+
+    /* --- ESTILOS EXISTENTES PARA BOTÃO (mantidos) --- */
+    button {
+      background-color: var(--spotify-green); color: var(--spotify-light);
+      padding: 12px 30px; border: none; font-size: 1.1rem; border-radius: 50px;
+      cursor: pointer; transition: all 0.3s ease; font-weight: 600; letter-spacing: 0.5px;
+      text-transform: uppercase; margin-top: 0.5rem; box-shadow: 0 4px 15px rgba(29, 185, 84, 0.4);
+      position: relative; overflow: hidden;
+    }
+    button:hover { background-color: #1ed760; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(29, 185, 84, 0.6); }
+    button:active { transform: translateY(0); }
+    button::after { /* Efeito de brilho no hover */
+      content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
+      background: linear-gradient(to bottom right, rgba(255, 255, 255, 0) 45%, rgba(255, 255, 255, 0.8) 50%, rgba(255, 255, 255, 0) 55%);
+      transform: rotate(30deg); transition: all 0.3s;
+    }
+    button:hover::after { left: 100%; }
+
+    /* --- ESTILOS EXISTENTES PARA PARTÍCULAS (mantidos) --- */
+    .particles { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: -1; }
+    .particle { position: absolute; background: var(--spotify-green); border-radius: 50%; opacity: 0; animation: float 15s infinite linear; }
+    @keyframes float { 0% { transform: translateY(0) rotate(0deg); opacity: 0; } 10% { opacity: 0.3; } 100% { transform: translateY(-1000px) rotate(720deg); opacity: 0; } }
+
+    /* --- MEDIA QUERIES (mantidos) --- */
+    @media (max-width: 600px) {
+      #game-container { padding: 1.5rem; border-radius: 0; min-height: 100vh; }
+      h1 { font-size: 2rem; }
+      canvas { width: 100%; height: auto; }
+      #period-selector { gap: 10px; } /* Ajuste para telas menores */
+      #period-selector label { padding: 6px 12px; font-size: 0.8rem; }
+    }
+    /* --- ESTILOS PARA ANIMAÇÃO NOW PLAYING --- */
+    #now-playing-animation {
+        display: flex;
+        align-items: flex-end; /* Alinha barras na base */
+        height: 24px; /* Altura da animação */
+        width: 30px; /* Largura da animação */
+        gap: 3px; /* Espaço entre as barras */
+        margin: 0 5px 0 0; /* Margem para separar do texto */
+        opacity: 0; /* Começa invisível */
+        transition: opacity 0.3s ease;
+    }
+
+    #now-playing.active #now-playing-animation {
+        opacity: 0.8; /* Fica visível quando ativo */
+    }
+
+    #now-playing-animation .bar {
+        display: block;
+        width: 4px; /* Largura de cada barra */
+        height: 100%; /* Começa com altura total (será escalada) */
+        background-color: var(--spotify-green);
+        border-radius: 2px;
+        transform-origin: bottom; /* Animação cresce de baixo para cima */
+        animation: equalize 1.2s infinite ease-in-out alternate;
+        animation-play-state: paused; /* Animação pausada por padrão */
+    }
+
+    #now-playing.active #now-playing-animation .bar {
+         animation-play-state: running; /* Animação roda quando ativo */
+    }
+
+    /* Keyframes da animação */
+    @keyframes equalize {
+        0% { transform: scaleY(0.1); }
+        25% { transform: scaleY(0.8); }
+        50% { transform: scaleY(0.3); }
+        75% { transform: scaleY(1.0); }
+        100% { transform: scaleY(0.2); }
+    }
+
+    /* Adiciona delay diferente para cada barra */
+    #now-playing-animation .bar:nth-child(1) { animation-delay: 0s; }
+    #now-playing-animation .bar:nth-child(2) { animation-delay: -0.2s; }
+    #now-playing-animation .bar:nth-child(3) { animation-delay: -0.4s; }
+    #now-playing-animation .bar:nth-child(4) { animation-delay: -0.1s; }
+    #now-playing-animation .bar:nth-child(5) { animation-delay: -0.3s; }
+
+    /* Ajuste no layout flex de now-playing para acomodar a animação */
+     #now-playing {
+        /* ... (outros estilos existentes) ... */
+        gap: 8px; /* Ajuste o gap geral se necessário */
+     }
+     #now-playing-info {
+       /* ... (outros estilos existentes) ... */
+        margin-left: 5px; /* Adiciona pequena margem se a animação ficar muito colada */
+     }
+     #dynamic-background {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-size: cover;
+    background-position: center;
+    opacity: 0.15; /* Transparência para não atrapalhar o jogo */
+    z-index: -2; /* Fica atrás do jogo, mas na frente do fundo gradiente */
+    transition: background-image 0.5s ease-in-out;
+    }
+
+    /* Estilos para o formulário do Last.fm */
+    #lastfm-form {
+      margin-top: 15px;
+      padding: 10px;
+      background: rgba(40, 40, 40, 0.4);
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    #lastfm-form input[type="text"] {
+      padding: 8px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--spotify-gray);
+      background: rgba(30, 30, 30, 0.7);
+      color: white;
+      margin: 5px 0;
+      width: 80%;
+      font-family: 'Poppins', sans-serif;
+    }
+
+    #lastfm-form button {
+      margin-top: 10px;
+      padding: 8px 15px;
+      font-size: 0.9rem;
+    }
+
+    /* Estilos para o container de estatísticas */
+    #stats-container {
+      margin-top: 15px;
+      padding: 10px;
+      background: rgba(40, 40, 40, 0.4);
+      border-radius: 10px;
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.5s ease;
+    }
+
+    #stats-container.active {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .stats-title {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: var(--spotify-green);
+    }
+
+    .stats-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 8px;
+      padding: 5px;
+      background: rgba(30, 30, 30, 0.5);
+      border-radius: 5px;
+    }
+
+    .stats-item img {
+      width: 30px;
+      height: 30px;
+      border-radius: 4px;
+      margin-right: 10px;
+    }
+
+    .stats-item-info {
+      flex-grow: 1;
+      overflow: hidden;
+    }
+
+    .stats-item-name {
+      font-size: 0.9rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .stats-item-artist {
+      font-size: 0.8rem;
+      color: var(--spotify-light-gray);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .stats-item-plays {
+      font-size: 0.8rem;
+      color: var(--deezer-blue);
+      margin-left: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="particles" id="particles"></div>
+  <div id="dynamic-background"></div>
+  
+  <div id="login-container" style="display: none;">
+    <div>
+      <h1>MNZ SNAKE</h1>
+    </div>
+    <div class="login-info">
+      <p>Conecte-se ao Spotify para jogar Snake com suas músicas favoritas!</p>
+      <p>O jogo usa o Deezer para reprodução e pode integrar com o Last.fm para estatísticas.</p>
+    </div>
+    <a href="/login/spotify" class="login-button">
+      <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/19/Spotify_logo_without_text.svg/1024px-Spotify_logo_without_text.svg.png" alt="Spotify Logo">
+      Entrar com Spotify
+    </a>
+  </div>
+  
+  <div id="game-container" style="display: none;">
+    <div class="user-profile">
+      <img id="user-avatar" src="https://via.placeholder.com/40" alt="Avatar">
+      <span class="user-name" id="user-name">Usuário</span>
+      <a href="/logout" class="logout-link">Sair</a>
+    </div>
+    
+    <div>
+      <h1>MNZ SNAKE</h1>
+    </div>
+    <div id="time">Tempo: 0s</div>
+    <canvas id="snake-canvas" width="400" height="400"></canvas>
+    <div id="score">Pontuação: <span>0</span></div>
+
+    <div id="now-playing">
+      <img id="now-playing-art" src="https://via.placeholder.com/50?text=?" alt="Album Art">
+
+      <div id="now-playing-animation">
+          <span class="bar"></span>
+          <span class="bar"></span>
+          <span class="bar"></span>
+          <span class="bar"></span>
+          <span class="bar"></span>
+      </div>
+      <div id="now-playing-info">
+          <div id="now-playing-track">Nenhuma música</div>
+          <div id="now-playing-artist">Escolha um período e inicie!</div>
+      </div>
+    </div>
+
+    <div id="period-selector">
+        <label>
+            <input type="radio" name="period" value="12month" checked>
+            <span>Top 1 Ano</span>
+        </label>
+        <label>
+            <input type="radio" name="period" value="overall">
+            <span>Overall</span>
+        </label>
+        <label>
+            <input type="radio" name="period" value="6month">
+            <span>Top 6 Meses</span>
+        </label>
+        <label>
+            <input type="radio" name="period" value="1month">
+            <span>Top 1 Mês</span>
+        </label>
+    </div>
+
+    <button id="start-btn">Iniciar Jogo</button>
+    
+    <div id="lastfm-form">
+      <p>Integrar com Last.fm (opcional)</p>
+      <input type="text" id="lastfm-username" placeholder="Seu nome de usuário do Last.fm">
+      <button id="lastfm-submit">Buscar Estatísticas</button>
+    </div>
+    
+    <div id="stats-container">
+      <div class="stats-title">Suas Top Músicas no Last.fm</div>
+      <div id="stats-content"></div>
+    </div>
+  </div>
+
+  <script>
+    // Efeito de partículas (mantido)
+    document.addEventListener('DOMContentLoaded', () => {
+      const particles = document.getElementById('particles');
+      const particleCount = 30;
+      for (let i = 0; i < particleCount; i++) {
+        const particle = document.createElement('div');
+        particle.classList.add('particle');
+        const size = Math.random() * 4 + 2;
+        particle.style.width = `${size}px`; particle.style.height = `${size}px`;
+        particle.style.left = `${Math.random() * 100}%`; particle.style.bottom = `-10px`;
+        particle.style.animationDelay = `${Math.random() * 15}s`;
+        particle.style.animationDuration = `${10 + Math.random() * 20}s`;
+        particle.style.opacity = Math.random() * 0.5;
+        particles.appendChild(particle);
+      }
+
+      // Garante que o elemento de pontuação tenha o span (mantido)
+      const scoreElement = document.getElementById('score');
+      if (!scoreElement.querySelector('span')) { // Verifica se o span já existe
+        scoreElement.innerHTML = 'Pontuação: <span>0</span>';
+      }
+      
+      // Verifica o status de autenticação
+      checkAuthStatus();
+      
+      // Configura o formulário do Last.fm
+      setupLastFmForm();
+    });
+    
+    // Função para verificar o status de autenticação
+    async function checkAuthStatus() {
+      try {
+        const response = await fetch('/auth/status');
+        const data = await response.json();
+        
+        if (data.authenticated) {
+          // Usuário autenticado, mostra o jogo
+          document.getElementById('login-container').style.display = 'none';
+          document.getElementById('game-container').style.display = 'block';
+          
+          // Atualiza o nome do usuário
+          document.getElementById('user-name').textContent = data.user_name || 'Usuário';
+          
+          // Carrega o script do jogo
+          loadGameScript();
+        } else {
+          // Usuário não autenticado, mostra a tela de login
+          document.getElementById('login-container').style.display = 'block';
+          document.getElementById('game-container').style.display = 'none';
+        }
+      } catch (error) {
+        console.error('Erro ao verificar autenticação:', error);
+        // Em caso de erro, mostra a tela de login
+        document.getElementById('login-container').style.display = 'block';
+        document.getElementById('game-container').style.display = 'none';
+      }
+    }
+    
+    // Função para carregar o script do jogo
+    function loadGameScript() {
+      const script = document.createElement('script');
+      script.src = '/static/js/snake.js';
+      document.body.appendChild(script);
+    }
+    
+    // Função para configurar o formulário do Last.fm
+    function setupLastFmForm() {
+      const form = document.getElementById('lastfm-form');
+      const submitButton = document.getElementById('lastfm-submit');
+      const usernameInput = document.getElementById('lastfm-username');
+      const statsContainer = document.getElementById('stats-container');
+      const statsContent = document.getElementById('stats-content');
+      
+      submitButton.addEventListener('click', async () => {
+        const username = usernameInput.value.trim();
+        
+        if (!username) {
+          alert('Por favor, insira seu nome de usuário do Last.fm');
+          return;
+        }
+        
+        submitButton.disabled = true;
+        submitButton.textContent = 'Buscando...';
+        
+        try {
+          const response = await fetch(`/api/lastfm/stats?username=${encodeURIComponent(username)}`);
+          const data = await response.json();
+          
+          if (data.error) {
+            alert(`Erro: ${data.error}`);
+            return;
+          }
+          
+          // Limpa o conteúdo anterior
+          statsContent.innerHTML = '';
+          
+          // Adiciona as top tracks
+          if (data.top_tracks && data.top_tracks.track) {
+            data.top_tracks.track.forEach(track => {
+              const item = document.createElement('div');
+              item.className = 'stats-item';
+              
+              const img = document.createElement('img');
+              img.src = track.image && track.image.length > 0 ? 
+                track.image[1]['#text'] : 'https://via.placeholder.com/30';
+              img.alt = track.name;
+              
+              const info = document.createElement('div');
+              info.className = 'stats-item-info';
+              
+              const name = document.createElement('div');
+              name.className = 'stats-item-name';
+              name.textContent = track.name;
+              
+              const artist = document.createElement('div');
+              artist.className = 'stats-item-artist';
+              artist.textContent = track.artist.name;
+              
+              const plays = document.createElement('div');
+              plays.className = 'stats-item-plays';
+              plays.textContent = `${track.playcount} plays`;
+              
+              info.appendChild(name);
+              info.appendChild(artist);
+              
+              item.appendChild(img);
+              item.appendChild(info);
+              item.appendChild(plays);
+              
+              statsContent.appendChild(item);
+            });
+            
+            // Mostra o container de estatísticas
+            statsContainer.classList.add('active');
+          } else {
+            statsContent.innerHTML = '<p>Nenhuma estatística encontrada.</p>';
+          }
+        } catch (error) {
+          console.error('Erro ao buscar estatísticas:', error);
+          alert('Erro ao buscar estatísticas. Tente novamente mais tarde.');
+        } finally {
+          submitButton.disabled = false;
+          submitButton.textContent = 'Buscar Estatísticas';
+        }
+      });
+    }
+  </script>
+</body>
+</html>
