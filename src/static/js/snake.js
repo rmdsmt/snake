@@ -1,4 +1,4 @@
-// snake.js - Versão final com física e efeitos visuais
+// snake.js - Versão final com física suave sem quicar
 
 // --- SELEÇÃO DE ELEMENTOS DO DOM ---
 const canvas = document.getElementById('snake-canvas');
@@ -17,7 +17,7 @@ let tracks = []; // Lista de músicas da API
 let snakeTracks = []; // Índices das músicas na cobra
 let currentDirection = 'right';
 let nextDirection = 'right';
-let snake = [{ x: 5, y: 5, px: 5, py: 5, offsetY: 0 }]; // Posição inicial com física
+let snake = [{ x: 5, y: 5, px: 5, py: 5 }]; // Posição inicial com física (sem offsetY)
 let food = null; // Objeto da comida { x, y, trackIndex }
 let score = 0;
 let gameStarted = false;
@@ -35,11 +35,6 @@ const baseTileSize = 20; // Tamanho base de cada célula em pixels
 const snakeTileSize = 20; // Tamanho dos segmentos da cobra
 canvas.width = gridSize * baseTileSize;
 canvas.height = gridSize * baseTileSize;
-
-// Constantes de efeito físico
-const PUSH_FORCE = 15; // Força de impulso quando come
-const GRAVITY = 0.8; // Gravidade aplicada aos segmentos
-const BOUNCE = 0.6; // Coeficiente de rebote
 
 // Cache de Imagens e Fallback
 const imageCache = new Map();
@@ -276,32 +271,9 @@ function checkFood() {
         // Acelera o jogo
         moveInterval = Math.max(70, moveInterval * 0.98);
         
-        // Aplica efeito de impulso em todos os segmentos
-        snake.forEach(segment => {
-            segment.offsetY += PUSH_FORCE;
-        });
-        
         // Gera nova comida
         food = generateFood();
     }
-}
-
-// Função para atualizar a física dos segmentos
-function updatePhysics() {
-    snake.forEach(segment => {
-        if (segment.offsetY !== 0) {
-            // Aplica gravidade
-            segment.offsetY += GRAVITY;
-            
-            // Se estiver caindo (offsetY positivo), aplica rebote
-            if (segment.offsetY > 0) {
-                segment.offsetY *= -BOUNCE;
-                
-                // Se o movimento for muito pequeno, para completamente
-                if (Math.abs(segment.offsetY) < 0.5) segment.offsetY = 0;
-            }
-        }
-    });
 }
 
 // Função para atualizar a posição da cobra
@@ -321,8 +293,7 @@ function updateSnake() {
         x: head.x + dx[currentDirection],
         y: head.y + dy[currentDirection],
         px: head.x, // Posição anterior X (para interpolação)
-        py: head.y, // Posição anterior Y (para interpolação)
-        offsetY: -PUSH_FORCE // Aplica impulso inicial na nova cabeça
+        py: head.y  // Posição anterior Y (para interpolação)
     };
     
     // Adiciona a nova cabeça ao início da cobra
@@ -338,7 +309,7 @@ function updateSnake() {
 
 // --- FUNÇÕES DE DESENHO ---
 
-// Função para desenhar a cobra com interpolação e efeitos físicos
+// Função para desenhar a cobra com interpolação suave
 async function drawSnake(t) {
     for (let i = 0; i < snake.length; i++) {
         const s = snake[i];
@@ -346,9 +317,6 @@ async function drawSnake(t) {
         // Interpolação entre posição anterior e atual
         const tx = s.px + (s.x - s.px) * t;
         const ty = s.py + (s.y - s.py) * t;
-        
-        // Aplica o offset vertical (efeito de pulo)
-        const yOffset = s.offsetY * Math.min(1, t * 2);
         
         // Obtém o índice da música para este segmento
         const trackIndex = snakeTracks[i] || 0;
@@ -359,38 +327,22 @@ async function drawSnake(t) {
         // Calcula o offset para centralização
         const offset = (baseTileSize - snakeTileSize) / 2;
         
-        // Salva o contexto para transformações
-        ctx.save();
-        
-        // Translada para a posição do segmento
-        ctx.translate(
-            tx * baseTileSize + baseTileSize/2,
-            ty * baseTileSize + baseTileSize/2 + yOffset
-        );
-        
-        // Aplica escala baseada no offset (efeito de esticar quando pula)
-        const scale = 1 + Math.abs(yOffset)/150;
-        ctx.scale(scale, scale);
-        
-        // Desenha a imagem centralizada
+        // Desenha a imagem do segmento
         ctx.drawImage(
             img,
-            -snakeTileSize/2 + offset,
-            -snakeTileSize/2 + offset,
+            tx * baseTileSize + offset,
+            ty * baseTileSize + offset,
             snakeTileSize,
             snakeTileSize
         );
-        
-        // Restaura o contexto
-        ctx.restore();
 
         // Destaque especial para a cabeça
         if (i === 0) {
-            ctx.strokeStyle = `rgba(255,255,255,${0.5 - Math.abs(yOffset)/100})`;
+            ctx.strokeStyle = 'rgba(255,255,255,0.7)';
             ctx.lineWidth = 1;
             ctx.strokeRect(
                 tx * baseTileSize + offset - 1,
-                ty * baseTileSize + offset - 1 + yOffset,
+                ty * baseTileSize + offset - 1,
                 snakeTileSize + 2,
                 snakeTileSize + 2
             );
@@ -466,9 +418,6 @@ async function gameLoop(timestamp) {
     
     // Acumula o tempo para a física
     accumulator += delta;
-
-    // Atualiza a física dos segmentos
-    updatePhysics();
     
     // Executa a lógica do jogo em intervalos fixos
     while (accumulator >= moveInterval) {
@@ -519,7 +468,7 @@ async function startGame() {
     }
     
     // Reseta o jogo
-    snake = [{ x: 5, y: 5, px: 5, py: 5, offsetY: 0 }];
+    snake = [{ x: 5, y: 5, px: 5, py: 5 }];
     snakeTracks = [0]; // Começa com a primeira música
     currentDirection = nextDirection = 'right';
     score = 0;
