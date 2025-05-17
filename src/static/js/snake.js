@@ -1,4 +1,4 @@
-// snake.js - Versão adaptada com movimentação suave e rápida
+// snake.js - Versão final com movimentação suave e ordem aleatória de músicas
 
 // --- SELEÇÃO DE ELEMENTOS DO DOM ---
 const canvas = document.getElementById('snake-canvas');
@@ -27,7 +27,8 @@ let startTime = 0;
 let gameLoopTimeout = null; // Para controlar o loop com setTimeout
 let timerInterval = null; // Para o timer de tempo de jogo
 let lastUpdateTime = 0; // Para animação suave
-let animationSpeed = 0.4; // Velocidade da animação (aumentada para movimento mais rápido)
+let animationSpeed = 0.3; // Velocidade da animação (ajustada para movimento mais natural)
+let segmentSpacing = 0.2; // Espaçamento entre segmentos da cobra (0-1, quanto maior mais espaçado)
 
 // Constantes de Grid e Tamanho
 const gridSize = 20; // Número de células na largura/altura
@@ -36,8 +37,8 @@ canvas.width = gridSize * tileSize;
 canvas.height = gridSize * tileSize;
 
 // Constantes de aceleração
-const INITIAL_INTERVAL = 180; // Velocidade inicial (ms) - ajustada para ser mais rápida
-const MIN_INTERVAL = 80; // Velocidade máxima (ms) - ajustada para ser mais rápida
+const INITIAL_INTERVAL = 180; // Velocidade inicial (ms)
+const MIN_INTERVAL = 80; // Velocidade máxima (ms)
 const ACCELERATION_FACTOR = 0.98; // Quanto mais perto de 1, mais lenta a aceleração
 let moveInterval = INITIAL_INTERVAL; // Velocidade atual
 
@@ -54,7 +55,7 @@ function formatTime(totalSeconds) {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
-// Função shuffle
+// Função shuffle para garantir ordem aleatória das músicas
 function shuffleArray(array) {
   const newArray = [...array];
   for (let i = newArray.length - 1; i > 0; i--) {
@@ -172,6 +173,10 @@ async function fetchTracks() {
             throw new Error(`Poucas músicas (${data.length}) encontradas para jogar.`);
         }
 
+        // Embaralha as músicas para garantir ordem aleatória
+        data = shuffleArray(data);
+        console.log("Músicas embaralhadas para ordem aleatória");
+
         // Pré-carrega imagens (opcional, mas melhora performance visual)
         await Promise.all(data.map(track => loadImage(track.image)));
 
@@ -239,36 +244,40 @@ function checkCollision() {
 
 // Função para atualizar as coordenadas visuais (animação suave)
 function updateVisualPositions(deltaTime) {
-    // Usa um loop separado para garantir que a cabeça seja atualizada primeiro
-    // Isso cria um efeito de "onda" mais natural no movimento da cobra
-    
-    // Primeiro atualiza a cabeça
+    // Atualiza a cabeça primeiro
     const head = snake[0];
     const dx = head.x - head.visualX;
     const dy = head.y - head.visualY;
     
-    // Atualiza posição visual com interpolação suave
     head.visualX += dx * animationSpeed * deltaTime;
     head.visualY += dy * animationSpeed * deltaTime;
     
-    // Depois atualiza o resto do corpo com um pequeno atraso
+    // Depois atualiza o resto do corpo com espaçamento
     for (let i = 1; i < snake.length; i++) {
         const segment = snake[i];
         const prevSegment = snake[i-1];
         
-        // Segue o segmento anterior com um pequeno atraso
-        const targetX = prevSegment.visualX;
-        const targetY = prevSegment.visualY;
+        // Calcula a posição alvo com espaçamento
+        // Quanto maior o segmentSpacing, mais espaço entre os segmentos
+        const dirX = prevSegment.x - segment.x;
+        const dirY = prevSegment.y - segment.y;
+        
+        // Normaliza a direção
+        const length = Math.sqrt(dirX * dirX + dirY * dirY);
+        const normX = length > 0 ? dirX / length : 0;
+        const normY = length > 0 ? dirY / length : 0;
+        
+        // Posição alvo com espaçamento
+        const targetX = prevSegment.visualX - normX * segmentSpacing;
+        const targetY = prevSegment.visualY - normY * segmentSpacing;
         
         // Calcula a diferença entre posição atual e alvo
         const dx = targetX - segment.visualX;
         const dy = targetY - segment.visualY;
         
         // Atualiza posição visual com interpolação suave
-        // Segmentos mais próximos da cabeça se movem mais rápido
-        const speedFactor = 1 - (i / (snake.length * 2));
-        segment.visualX += dx * animationSpeed * deltaTime * speedFactor;
-        segment.visualY += dy * animationSpeed * deltaTime * speedFactor;
+        segment.visualX += dx * animationSpeed * deltaTime;
+        segment.visualY += dy * animationSpeed * deltaTime;
     }
 }
 
@@ -286,7 +295,7 @@ function updateGame() {
         case 'right': head.x += 1; break;
     }
 
-    // Adiciona coordenadas visuais iguais às reais para a nova cabeça
+    // Adiciona coordenadas visuais para a nova cabeça
     head.visualX = snake[0].x; // Usa a posição anterior da cabeça como ponto de partida
     head.visualY = snake[0].y; // Isso cria um efeito mais suave
 
@@ -411,12 +420,16 @@ async function drawGame(timestamp) {
                 const img = await loadImage(segmentTrack.image);
                 
                 // Usa as coordenadas visuais para desenho suave
+                // Reduz ligeiramente o tamanho para criar espaçamento visual
+                const segmentSize = i === 0 ? tileSize : tileSize * 0.9; // Cabeça normal, corpo ligeiramente menor
+                const offset = (tileSize - segmentSize) / 2;
+                
                 ctx.drawImage(
                     img, 
-                    Math.round(segment.visualX * tileSize), // Arredonda para evitar desenho borrado
-                    Math.round(segment.visualY * tileSize), 
-                    tileSize, 
-                    tileSize
+                    Math.round(segment.visualX * tileSize + offset), 
+                    Math.round(segment.visualY * tileSize + offset), 
+                    segmentSize, 
+                    segmentSize
                 );
 
                 // Adiciona destaque na cabeça
@@ -638,3 +651,40 @@ startButton.addEventListener('touchstart', function(e) {
     e.preventDefault(); // Previne comportamento padrão
     this.click(); // Simula um clique
 }, { passive: false });
+
+// Adiciona suporte aos botões de controle touch
+document.addEventListener('DOMContentLoaded', function() {
+    // Verifica se os elementos existem
+    const touchUp = document.getElementById('touch-up');
+    const touchDown = document.getElementById('touch-down');
+    const touchLeft = document.getElementById('touch-left');
+    const touchRight = document.getElementById('touch-right');
+    
+    if (touchUp) {
+        touchUp.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            if (gameStarted && currentDirection !== 'down') nextDirection = 'up';
+        });
+    }
+    
+    if (touchDown) {
+        touchDown.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            if (gameStarted && currentDirection !== 'up') nextDirection = 'down';
+        });
+    }
+    
+    if (touchLeft) {
+        touchLeft.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            if (gameStarted && currentDirection !== 'right') nextDirection = 'left';
+        });
+    }
+    
+    if (touchRight) {
+        touchRight.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            if (gameStarted && currentDirection !== 'left') nextDirection = 'right';
+        });
+    }
+});
